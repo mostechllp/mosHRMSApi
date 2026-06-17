@@ -127,8 +127,8 @@ class LoginController extends ApiController
         auth('api')->logout();
         return $this->success(null, 'Successfully logged out');
     }
-    
-     #[OA\Post(
+
+    #[OA\Post(
         path: "/api/auth/refresh",
         operationId: "refreshToken",
         summary: "Refresh auth token",
@@ -152,7 +152,7 @@ class LoginController extends ApiController
     {
         try {
             $token = auth('api')->refresh();
-            $user = auth('api')->user();
+            $user = auth('api')->setToken($token)->user();
 
             if (!$user) {
                 return $this->error('User not found', 404);
