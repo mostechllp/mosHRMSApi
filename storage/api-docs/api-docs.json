@@ -1,0 +1,2893 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "HRMS API Documentation",
+        "description": "Swagger API documentation for the HRMS Application",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "https://lawngreen-salamander-508885.hostingersite.com",
+            "description": "API Server"
+        }
+    ],
+    "paths": {
+        "/api/admin/assets": {
+            "get": {
+                "tags": [
+                    "Assets"
+                ],
+                "summary": "Get all assets",
+                "operationId": "getAssets",
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Assets"
+                ],
+                "summary": "Create asset",
+                "operationId": "storeAsset",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "asset_name",
+                                    "asset_type_id"
+                                ],
+                                "properties": {
+                                    "asset_name": {
+                                        "type": "string"
+                                    },
+                                    "asset_type_id": {
+                                        "type": "integer"
+                                    },
+                                    "brand": {
+                                        "type": "string"
+                                    },
+                                    "model": {
+                                        "type": "string"
+                                    },
+                                    "serial_number": {
+                                        "type": "string"
+                                    },
+                                    "purchase_price": {
+                                        "type": "number"
+                                    },
+                                    "purchase_date": {
+                                        "type": "string",
+                                        "format": "date"
+                                    },
+                                    "warranty_expiry": {
+                                        "type": "string",
+                                        "format": "date"
+                                    },
+                                    "status": {
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created"
+                    }
+                }
+            }
+        },
+        "/api/admin/assets/{id}": {
+            "put": {
+                "tags": [
+                    "Assets"
+                ],
+                "summary": "Update asset",
+                "operationId": "updateAsset",
+                "responses": {
+                    "200": {
+                        "description": "Updated"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Assets"
+                ],
+                "summary": "Delete asset",
+                "operationId": "deleteAsset",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Asset ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Asset deleted successfully"
+                    },
+                    "404": {
+                        "description": "Asset not found"
+                    }
+                }
+            }
+        },
+        "/api/admin/assets/{id}/assign": {
+            "post": {
+                "tags": [
+                    "Assets"
+                ],
+                "summary": "Assign asset to employee",
+                "operationId": "assignAsset",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "employee_id",
+                                    "assigned_date"
+                                ],
+                                "properties": {
+                                    "employee_id": {
+                                        "type": "integer"
+                                    },
+                                    "assigned_date": {
+                                        "type": "string",
+                                        "format": "date"
+                                    },
+                                    "notes": {
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Assigned"
+                    }
+                }
+            }
+        },
+        "/api/admin/assets/{id}/revoke": {
+            "post": {
+                "tags": [
+                    "Assets"
+                ],
+                "summary": "Revoke asset from employee",
+                "operationId": "revokeAsset",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "returned_date"
+                                ],
+                                "properties": {
+                                    "returned_date": {
+                                        "type": "string",
+                                        "format": "date"
+                                    },
+                                    "return_condition": {
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Revoked"
+                    }
+                }
+            }
+        },
+        "/api/employee/assets/{employeeId}": {
+            "get": {
+                "tags": [
+                    "Assets"
+                ],
+                "summary": "Get assets assigned to an employee",
+                "operationId": "getEmployeeAssets",
+                "parameters": [
+                    {
+                        "name": "employeeId",
+                        "in": "path",
+                        "description": "Employee ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Employee assets fetched successfully"
+                    },
+                    "404": {
+                        "description": "Employee not found"
+                    }
+                }
+            }
+        },
+        "/api/admin/assets/types": {
+            "get": {
+                "tags": [
+                    "Asset Types"
+                ],
+                "summary": "Get all asset types",
+                "operationId": "getAssetTypes",
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Asset Types"
+                ],
+                "summary": "Create asset type",
+                "operationId": "storeAssetType",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "description": {
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created"
+                    }
+                }
+            }
+        },
+        "/api/admin/assets/types/{id}": {
+            "get": {
+                "tags": [
+                    "Asset Types"
+                ],
+                "summary": "Get asset type by ID",
+                "operationId": "getAssetType",
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Asset Types"
+                ],
+                "summary": "Update asset type",
+                "operationId": "updateAssetType",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "description": {
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Asset Types"
+                ],
+                "summary": "Delete asset type",
+                "operationId": "deleteAssetType",
+                "responses": {
+                    "200": {
+                        "description": "Deleted"
+                    }
+                }
+            }
+        },
+        "/api/admin/attendance": {
+            "get": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Get attendance summary with stats",
+                "description": "Retrieves attendance records with optional filtering by company, employee name, and date preset.",
+                "operationId": "getAttendanceSummary",
+                "parameters": [
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "description": "Items per page",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 15
+                        }
+                    },
+                    {
+                        "name": "company_id",
+                        "in": "query",
+                        "description": "Filter by Company ID",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "employee_name",
+                        "in": "query",
+                        "description": "Filter by Employee Name",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "date_preset",
+                        "in": "query",
+                        "description": "Date preset filter",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "all",
+                            "enum": [
+                                "all",
+                                "today",
+                                "yesterday",
+                                "last_week",
+                                "last_month",
+                                "custom"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "from_date",
+                        "in": "query",
+                        "description": "From date for custom preset",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "to_date",
+                        "in": "query",
+                        "description": "To date for custom preset",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Manually add attendance for an employee",
+                "description": "Creates a manual attendance log entry for a specific employee on a given date.",
+                "operationId": "storeAttendance",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "userid",
+                                    "log_date",
+                                    "punch_in"
+                                ],
+                                "properties": {
+                                    "userid": {
+                                        "type": "integer",
+                                        "example": 5
+                                    },
+                                    "company_id": {
+                                        "type": "integer",
+                                        "example": 1,
+                                        "nullable": true
+                                    },
+                                    "log_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2026-06-07"
+                                    },
+                                    "punch_in": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "example": "2026-06-07 09:00:00"
+                                    },
+                                    "punch_out": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "example": "2026-06-07 18:00:00",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Attendance manually added successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Attendance manually added successfully."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    },
+                    "500": {
+                        "description": "Server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/attendance/{id}": {
+            "put": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Update an existing attendance log",
+                "description": "Updates attendance log details for an employee.",
+                "operationId": "updateAttendance",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Attendance Log ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "company_id": {
+                                        "type": "integer",
+                                        "example": 1,
+                                        "nullable": true
+                                    },
+                                    "log_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2026-06-07"
+                                    },
+                                    "punch_in": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "example": "2026-06-07 09:00:00"
+                                    },
+                                    "punch_out": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "example": "2026-06-07 18:00:00",
+                                        "nullable": true
+                                    },
+                                    "attendance_status": {
+                                        "type": "string",
+                                        "example": "present",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Attendance updated successfully"
+                    },
+                    "404": {
+                        "description": "Attendance record not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Delete an attendance log",
+                "description": "Deletes a specific attendance log.",
+                "operationId": "deleteAttendance",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Attendance Log ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Attendance deleted successfully"
+                    },
+                    "404": {
+                        "description": "Attendance record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/attendance/upload": {
+            "post": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Upload attendance file",
+                "description": "Uploads a file (.dat, .csv, .txt) containing attendance records. Excels and CSVs are processed directly; .dat and .txt files are queued.",
+                "operationId": "uploadAttendance",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "description": "Attendance file",
+                                        "type": "string",
+                                        "format": "binary"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Upload successful or processing started"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    },
+                    "500": {
+                        "description": "Server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/attendance/upload-status/{id}": {
+            "get": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Check attendance upload progress",
+                "description": "Retrieves the current processing status and progress for a queued attendance file upload.",
+                "operationId": "uploadStatus",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Upload ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Upload status retrieved"
+                    },
+                    "404": {
+                        "description": "Upload record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/attendance/punch-in-today": {
+            "get": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Get employees who punched in today",
+                "description": "Retrieves attendance logs for employees who punched in today before 12:00 PM.",
+                "operationId": "punchInToday",
+                "parameters": [
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 15
+                        }
+                    },
+                    {
+                        "name": "company_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of today punch-ins"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/attendance/punch-in-yesterday": {
+            "get": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Get employees who punched in yesterday",
+                "description": "Retrieves attendance logs for employees who punched in yesterday before 12:00 PM.",
+                "operationId": "punchInYesterday",
+                "parameters": [
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 15
+                        }
+                    },
+                    {
+                        "name": "company_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of yesterday punch-ins"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/attendance/punch-out-today": {
+            "get": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Get employees who punched out today",
+                "description": "Retrieves attendance logs for employees who punched out today at or after 12:00 PM.",
+                "operationId": "punchOutToday",
+                "parameters": [
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 15
+                        }
+                    },
+                    {
+                        "name": "company_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of today punch-outs"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/attendance/late-comers": {
+            "get": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Get employees who came late",
+                "description": "Retrieves employees who punched in after 08:10:59 AM.",
+                "operationId": "lateComers",
+                "parameters": [
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 15
+                        }
+                    },
+                    {
+                        "name": "date_preset",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "today"
+                        }
+                    },
+                    {
+                        "name": "company_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "from_date",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "to_date",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of late comers"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/attendance/absentees": {
+            "get": {
+                "tags": [
+                    "Attendance"
+                ],
+                "summary": "Get absent employees",
+                "description": "Retrieves list of active employees who do not have an attendance log for a given date.",
+                "operationId": "absentees",
+                "parameters": [
+                    {
+                        "name": "date",
+                        "in": "query",
+                        "description": "Date to check for absentees (defaults to today)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "company_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 15
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of absentees"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding": {
+            "get": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "List all offboarding records",
+                "description": "Returns a paginated list of offboarding records. Admins and HR Managers see all records; other roles see only employees they manage.",
+                "operationId": "listOffboardings",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Page number for pagination",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Offboarding records retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "description": "Laravel paginated result containing offboarding records",
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized access"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/initiate": {
+            "post": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Initiate or save a draft offboarding process",
+                "description": "Creates or updates an offboarding record for an employee. Pass `is_draft: true` to save as draft, or `false` to formally initiate.",
+                "operationId": "initiateOffboarding",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "employee_id"
+                                ],
+                                "properties": {
+                                    "employee_id": {
+                                        "type": "integer",
+                                        "example": 2
+                                    },
+                                    "last_working_day": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2026-06-10",
+                                        "nullable": true
+                                    },
+                                    "separation_type": {
+                                        "type": "string",
+                                        "example": "resignation",
+                                        "nullable": true
+                                    },
+                                    "notice_period_days": {
+                                        "type": "integer",
+                                        "example": 30,
+                                        "nullable": true
+                                    },
+                                    "notice_start_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2026-05-10",
+                                        "nullable": true
+                                    },
+                                    "visa_sponsorship": {
+                                        "type": "string",
+                                        "example": "Company sponsored",
+                                        "nullable": true
+                                    },
+                                    "nationality": {
+                                        "type": "string",
+                                        "example": "British",
+                                        "nullable": true
+                                    },
+                                    "reason_for_leaving": {
+                                        "type": "string",
+                                        "example": "Better opportunity abroad",
+                                        "nullable": true
+                                    },
+                                    "is_draft": {
+                                        "type": "boolean",
+                                        "example": false
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Offboarding initiated or draft saved",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Offboarding process initiated successfully."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Not authorized to initiate offboarding for this employee"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/{id}": {
+            "get": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Get full details of an offboarding record",
+                "description": "Retrieves a single offboarding record with all related data: employee, checklists, assets, interview, settlement and letters.",
+                "operationId": "showOffboarding",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Offboarding details retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Offboarding details retrieved successfully."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Offboarding record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/{id}/visa-status": {
+            "get": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Get visa cancellation details and checklist",
+                "description": "Returns the employee's visa details along with all visa_cancellation checklist tasks and their completion progress.",
+                "operationId": "getVisaStatus",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Visa cancellation details fetched successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Visa cancellation details fetched successfully."
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "offboarding_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "employee": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 2
+                                                        },
+                                                        "name": {
+                                                            "type": "string",
+                                                            "example": "Dr. Vipul Paul Thomas"
+                                                        },
+                                                        "employee_code": {
+                                                            "type": "string",
+                                                            "example": "MSC-DOC-0002"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "visa_details": {
+                                                    "properties": {
+                                                        "visa_number": {
+                                                            "type": "string",
+                                                            "example": "98765432111"
+                                                        },
+                                                        "visa_expiry_date": {
+                                                            "type": "string",
+                                                            "format": "date",
+                                                            "example": "2026-06-30"
+                                                        },
+                                                        "eid_number": {
+                                                            "type": "string",
+                                                            "example": "768-7679277893-88"
+                                                        },
+                                                        "eid_expiry_date": {
+                                                            "type": "string",
+                                                            "format": "date",
+                                                            "example": "2026-07-02"
+                                                        },
+                                                        "labor_number": {
+                                                            "type": "string",
+                                                            "example": null,
+                                                            "nullable": true
+                                                        },
+                                                        "visa_type": {
+                                                            "type": "string",
+                                                            "example": "company_visa"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "tasks": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "task_name": {
+                                                                "type": "string",
+                                                                "example": "Submit visa cancellation to GDRFA/ICP"
+                                                            },
+                                                            "status": {
+                                                                "type": "string",
+                                                                "example": "pending"
+                                                            },
+                                                            "responsible_role": {
+                                                                "type": "string",
+                                                                "example": "PRO"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "progress": {
+                                                    "type": "integer",
+                                                    "example": 33
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Offboarding record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/{id}/visa-status/complete": {
+            "post": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Complete the visa cancellation stage",
+                "description": "Marks the visa cancellation stage as completed and advances the offboarding status to `pending_checklist`. All visa_cancellation tasks must be completed or marked not_applicable first.",
+                "operationId": "completeVisaStatus",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Visa cancellation stage completed successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Visa cancellation process completed successfully."
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "example": null,
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Pending tasks still exist",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "All visa cancellation tasks must be completed before proceeding."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Offboarding record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/{id}/checklists": {
+            "patch": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Update the status of a checklist item",
+                "description": "Updates the status of a single offboarding checklist task (any category_id). The task must belong to the given offboarding record.",
+                "operationId": "updateOffboardingChecklist",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "task_id",
+                                    "status"
+                                ],
+                                "properties": {
+                                    "task_id": {
+                                        "type": "integer",
+                                        "example": 5
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "example": "completed",
+                                        "enum": [
+                                            "pending",
+                                            "completed",
+                                            "not_applicable"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Checklist item updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Checklist item updated successfully."
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 5
+                                                },
+                                                "offboarding_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "category_id": {
+                                                    "type": "string",
+                                                    "example": "general"
+                                                },
+                                                "task_name": {
+                                                    "type": "string",
+                                                    "example": "Return access card"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "completed"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Offboarding or checklist item not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/{id}/assets": {
+            "patch": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Update asset return status",
+                "description": "Updates the return status and condition of one or more assets linked to an offboarding record.",
+                "operationId": "updateAssets",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "assets"
+                                ],
+                                "properties": {
+                                    "assets": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id",
+                                                "status"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 3
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "Returned"
+                                                },
+                                                "condition": {
+                                                    "type": "string",
+                                                    "example": "Good",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Assets updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Assets updated successfully."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Offboarding record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/{id}/interview": {
+            "post": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Submit or update the exit interview",
+                "description": "Creates or updates the exit interview record for an offboarding process.",
+                "operationId": "submitInterview",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "interviewer": {
+                                        "type": "string",
+                                        "example": "Fatima Al Zaabi (HR)"
+                                    },
+                                    "interview_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2026-06-17"
+                                    },
+                                    "interview_mode": {
+                                        "type": "string",
+                                        "example": "In person"
+                                    },
+                                    "overall_satisfaction": {
+                                        "type": "string",
+                                        "example": "Satisfied"
+                                    },
+                                    "primary_reason": {
+                                        "type": "string",
+                                        "example": "Better opportunity"
+                                    },
+                                    "work_life_rating": {
+                                        "type": "string",
+                                        "example": "4",
+                                        "nullable": true
+                                    },
+                                    "manager_relationship_rating": {
+                                        "type": "string",
+                                        "example": "5",
+                                        "nullable": true
+                                    },
+                                    "enjoyed_most": {
+                                        "type": "string",
+                                        "example": "Collaborative team culture",
+                                        "nullable": true
+                                    },
+                                    "areas_for_improvement": {
+                                        "type": "string",
+                                        "example": "Clearer promotion paths",
+                                        "nullable": true
+                                    },
+                                    "would_recommend": {
+                                        "type": "boolean",
+                                        "example": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Exit interview submitted successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Exit interview submitted successfully."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Offboarding record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/{id}/settlement": {
+            "patch": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Create or update the final settlement",
+                "description": "Creates or updates the final settlement record for an offboarding process.",
+                "operationId": "updateSettlement",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "total_payable": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 45000
+                                    },
+                                    "total_deductions": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 2000
+                                    },
+                                    "net_payable": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 43000
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "example": "pending"
+                                    },
+                                    "remarks": {
+                                        "type": "string",
+                                        "example": "Includes gratuity and leave encashment",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Settlement updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Settlement updated successfully."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Offboarding record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/{id}/letters": {
+            "post": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Generate or update an offboarding letter record",
+                "description": "Creates or updates a letter record (e.g. experience letter, NOC, visa cancellation letter) for an offboarding process.",
+                "operationId": "generateLetters",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "letter_type"
+                                ],
+                                "properties": {
+                                    "letter_type": {
+                                        "type": "string",
+                                        "example": "experience_letter"
+                                    },
+                                    "document_path": {
+                                        "type": "string",
+                                        "example": "letters/exp_letter_emp2.pdf",
+                                        "nullable": true
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "example": "pending"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Letter record updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Letter record updated successfully."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Offboarding record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/offboarding/{id}/progress": {
+            "get": {
+                "tags": [
+                    "Offboarding"
+                ],
+                "summary": "Get overall offboarding progress",
+                "description": "Returns a breakdown of all offboarding steps with their individual status and an overall completion percentage.",
+                "operationId": "getOffboardingProgress",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Offboarding progress retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Offboarding progress fetched successfully."
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "offboarding_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "current_status": {
+                                                    "type": "string",
+                                                    "example": "pending_checklist"
+                                                },
+                                                "completed_steps": {
+                                                    "type": "integer",
+                                                    "example": 2
+                                                },
+                                                "total_steps": {
+                                                    "type": "integer",
+                                                    "example": 7
+                                                },
+                                                "progress_percentage": {
+                                                    "type": "integer",
+                                                    "example": 29
+                                                },
+                                                "steps": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "name": {
+                                                                "type": "string",
+                                                                "example": "Visa Cancellation"
+                                                            },
+                                                            "key": {
+                                                                "type": "string",
+                                                                "example": "visa"
+                                                            },
+                                                            "status": {
+                                                                "type": "string",
+                                                                "example": "completed",
+                                                                "enum": [
+                                                                    "pending",
+                                                                    "in_progress",
+                                                                    "completed"
+                                                                ]
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Offboarding record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/admin/checklists/{id}": {
+            "get": {
+                "tags": [
+                    "Offboarding Checklist"
+                ],
+                "summary": "Get all checklist items for an offboarding record",
+                "operationId": "getOffboardingChecklists",
+                "parameters": [
+                    {
+                        "name": "offboardingId",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Checklist items retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "properties": {
+                                            "id": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "offboarding_id": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "category_id": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "task_name": {
+                                                "type": "string",
+                                                "example": "Submit visa cancellation to GDRFA"
+                                            },
+                                            "status": {
+                                                "type": "string",
+                                                "example": "pending"
+                                            },
+                                            "responsible_role": {
+                                                "type": "string",
+                                                "example": "PRO"
+                                            },
+                                            "notes": {
+                                                "type": "string",
+                                                "example": null,
+                                                "nullable": true
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Offboarding record not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Offboarding Checklist"
+                ],
+                "summary": "Update a checklist item",
+                "operationId": "updateChecklist",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Checklist item ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 5
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "category_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "task_name": {
+                                        "type": "string",
+                                        "example": "Return laptop"
+                                    },
+                                    "responsible_role": {
+                                        "type": "string",
+                                        "example": "IT",
+                                        "nullable": true
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Wipe data before returning",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Checklist item updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Checklist updated successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 5
+                                                },
+                                                "offboarding_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "category_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "task_name": {
+                                                    "type": "string",
+                                                    "example": "Return laptop"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "pending"
+                                                },
+                                                "responsible_role": {
+                                                    "type": "string",
+                                                    "example": "IT"
+                                                },
+                                                "notes": {
+                                                    "type": "string",
+                                                    "example": "Wipe data before returning",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Checklist item not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Offboarding Checklist"
+                ],
+                "summary": "Create a new checklist item",
+                "operationId": "createChecklist",
+                "parameters": [
+                    {
+                        "name": "offboardingId",
+                        "in": "path",
+                        "description": "Offboarding ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "category_id",
+                                    "task_name"
+                                ],
+                                "properties": {
+                                    "category_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "task_name": {
+                                        "type": "string",
+                                        "example": "Return access card"
+                                    },
+                                    "responsible_role": {
+                                        "type": "string",
+                                        "example": "HR",
+                                        "nullable": true
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Collect from security desk",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Checklist item created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Checklist created successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 5
+                                                },
+                                                "offboarding_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "category_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "task_name": {
+                                                    "type": "string",
+                                                    "example": "Return access card"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "pending"
+                                                },
+                                                "responsible_role": {
+                                                    "type": "string",
+                                                    "example": "HR"
+                                                },
+                                                "notes": {
+                                                    "type": "string",
+                                                    "example": null,
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Offboarding Checklist"
+                ],
+                "summary": "Delete a checklist item",
+                "operationId": "deleteChecklist",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Checklist item ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 5
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Checklist item deleted successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Checklist deleted successfully"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Checklist item not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/admin/checklists/{id}/status": {
+            "patch": {
+                "tags": [
+                    "Offboarding Checklist"
+                ],
+                "summary": "Update the status of a checklist item",
+                "operationId": "updateChecklistStatus",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Checklist item ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 5
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "status"
+                                ],
+                                "properties": {
+                                    "status": {
+                                        "type": "string",
+                                        "example": "completed",
+                                        "enum": [
+                                            "pending",
+                                            "completed",
+                                            "not_applicable"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Checklist status updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Checklist status updated successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 5
+                                                },
+                                                "offboarding_id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "task_name": {
+                                                    "type": "string",
+                                                    "example": "Return access card"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "example": "completed"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Checklist item not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/checklist-categories": {
+            "get": {
+                "tags": [
+                    "Checklist Categories"
+                ],
+                "summary": "Get all checklist categories",
+                "operationId": "getChecklistCategories",
+                "responses": {
+                    "200": {
+                        "description": "Checklist categories fetched successfully"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Checklist Categories"
+                ],
+                "summary": "Create checklist category",
+                "operationId": "createChecklistCategory",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Visa Cancellation"
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "example": "Visa related cancellation tasks",
+                                        "nullable": true
+                                    },
+                                    "is_active": {
+                                        "type": "boolean",
+                                        "example": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Checklist category created successfully"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/admin/checklist-categories/{id}": {
+            "get": {
+                "tags": [
+                    "Checklist Categories"
+                ],
+                "summary": "Get checklist category details",
+                "operationId": "getChecklistCategory",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Checklist category retrieved successfully"
+                    },
+                    "404": {
+                        "description": "Checklist category not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Checklist Categories"
+                ],
+                "summary": "Update checklist category",
+                "operationId": "updateChecklistCategory",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Asset Return"
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "example": "Asset return related tasks",
+                                        "nullable": true
+                                    },
+                                    "is_active": {
+                                        "type": "boolean",
+                                        "example": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Checklist category updated successfully"
+                    },
+                    "404": {
+                        "description": "Checklist category not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Checklist Categories"
+                ],
+                "summary": "Delete checklist category",
+                "operationId": "deleteChecklistCategory",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Checklist category deleted successfully"
+                    },
+                    "404": {
+                        "description": "Checklist category not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/auth/forgot-password/send-code": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Send password reset code",
+                "description": "Sends a 6-digit verification code to the user's registered email address.",
+                "operationId": "sendResetCode",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "admin@example.com"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Reset code sent successfully"
+                    },
+                    "422": {
+                        "description": "Validation Error"
+                    },
+                    "500": {
+                        "description": "Failed to send email"
+                    }
+                }
+            }
+        },
+        "/api/auth/forgot-password/reset": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Reset password",
+                "description": "Reset user password using email and verification code.",
+                "operationId": "resetPassword",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email",
+                                    "code",
+                                    "password",
+                                    "password_confirmation"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "admin@example.com"
+                                    },
+                                    "code": {
+                                        "type": "string",
+                                        "example": "123456"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "NewPassword@123"
+                                    },
+                                    "password_confirmation": {
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "NewPassword@123"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Password reset successfully"
+                    },
+                    "422": {
+                        "description": "Invalid or expired verification code"
+                    },
+                    "404": {
+                        "description": "User not found"
+                    }
+                }
+            }
+        },
+        "/api/auth/login": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Login user",
+                "description": "Login and return an access token",
+                "operationId": "loginUser",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "username",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "username": {
+                                        "type": "string",
+                                        "example": "admin@example.com"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "example": "password123"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful login",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "access_token": {
+                                            "type": "string"
+                                        },
+                                        "token_type": {
+                                            "type": "string",
+                                            "example": "bearer"
+                                        },
+                                        "user": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "422": {
+                        "description": "Validation Error"
+                    }
+                }
+            }
+        },
+        "/api/auth/logout": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Logout user",
+                "description": "Logout the currently authenticated user",
+                "operationId": "logoutUser",
+                "responses": {
+                    "200": {
+                        "description": "Successfully logged out"
+                    },
+                    "401": {
+                        "description": "Unauthenticated"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/auth/me": {
+            "get": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Get logged-in user",
+                "description": "Get details of the currently authenticated user",
+                "operationId": "getAuthenticatedUser",
+                "responses": {
+                    "200": {
+                        "description": "Successful operation"
+                    },
+                    "401": {
+                        "description": "Unauthenticated"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "name": "Authorization",
+                "in": "header",
+                "bearerFormat": "JWT",
+                "scheme": "bearer"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Attendance",
+            "description": "Endpoints for managing employee attendance"
+        },
+        {
+            "name": "Offboarding",
+            "description": "Endpoints for managing the employee offboarding lifecycle"
+        },
+        {
+            "name": "Offboarding Checklist",
+            "description": "Manage checklist items within an offboarding process"
+        },
+        {
+            "name": "Checklist Categories",
+            "description": "Manage Offboarding Checklist Categories"
+        },
+        {
+            "name": "Assets",
+            "description": "Assets"
+        },
+        {
+            "name": "Asset Types",
+            "description": "Asset Types"
+        },
+        {
+            "name": "Authentication",
+            "description": "Authentication"
+        }
+    ]
+}
