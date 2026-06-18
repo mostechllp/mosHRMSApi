@@ -107,8 +107,6 @@ class EmployeeApiController extends ApiController
         // Update User part if User exists
         if ($employee->user) {
             $userData = [];
-            if (isset($data['username']))
-                $userData['username'] = $userEmail;
             if (isset($data['company_email']))
                 $userData['email'] = $userEmail;
             if (!empty($data['password']))

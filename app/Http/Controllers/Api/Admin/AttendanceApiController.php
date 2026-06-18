@@ -495,7 +495,7 @@ class AttendanceApiController extends ApiController
             DB::raw("MAX(punch_out) as punch_out")
         )
             ->groupBy('company_id', 'userid', 'log_date')
-            ->havingRaw("TIME(MIN(punch_in)) > '08:10:59' AND TIME(MIN(punch_in)) <= '12:00:00'");
+            ->havingRaw("TIME(MIN(punch_in)) > '10:00:01' AND TIME(MIN(punch_in)) <= '12:00:00'");
 
         if ($request->filled('company_id')) {
             $query->where('company_id', $request->company_id);
