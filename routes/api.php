@@ -109,6 +109,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
 
 
     // Attendance
+    Route::get('attendance/stats', [AttendanceApiController::class, 'stats'])->middleware('permission:attendance.read');
     Route::get('attendance', [AttendanceApiController::class, 'index'])->middleware('permission:attendance.read');
     Route::post('attendance', [AttendanceApiController::class, 'store'])->middleware('permission:attendance.edit');
     Route::put('attendance/{id}', [AttendanceApiController::class, 'update'])->middleware('permission:attendance.edit');
@@ -196,6 +197,8 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::get('company-nearest-expiry', [ReportApiController::class, 'companyNearestExpiry']);
         Route::get('company-upcoming-renewals', [ReportApiController::class, 'companyUpcomingRenewals']);
         Route::get('pending-leaves', [ReportApiController::class, 'pendingLeavesReport']);
+        Route::get('task-reports', [ReportApiController::class, 'taskReport']);
+        Route::get('task-reports/export', [ReportApiController::class, 'taskReportExport']);
         Route::post('export', [ReportApiController::class, 'export'])->middleware('permission:reports.read');
     });
 
