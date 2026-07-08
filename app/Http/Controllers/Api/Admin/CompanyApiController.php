@@ -28,6 +28,8 @@ class CompanyApiController extends ApiController
         $request->validate([
             'organization_id' => 'required|exists:organizations,id',
             'company_name' => 'required|string|max:255',
+            'company_type' => 'required|string|max:255',
+            'country' => 'required|string|max:255',
             'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:255',
             'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
@@ -56,6 +58,8 @@ class CompanyApiController extends ApiController
         $request->validate([
             'organization_id' => 'required|exists:organizations,id',
             'company_name' => 'required|string|max:255',
+            'company_type' => 'required|string|max:255',
+            'country' => 'required|string|max:255',
             'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:255',
             'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',

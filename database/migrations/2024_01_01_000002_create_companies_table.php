@@ -12,6 +12,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('organization_id')->nullable()->constrained()->nullOnDelete();
             $table->string('company_name');
+            $table->string('company_type')->nullable();
+            $table->string('country')->nullable();
             $table->string('phone')->nullable();
             $table->string('email')->nullable();
             $table->string('logo')->nullable();
