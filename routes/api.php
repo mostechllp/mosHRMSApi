@@ -50,7 +50,7 @@ Route::group(['prefix' => 'auth'], function () {
     Route::post('login', [LoginController::class, 'login']);
     Route::post('logout', [LoginController::class, 'logout'])->middleware('auth:api');
     Route::get('me', [LoginController::class, 'me'])->middleware('auth:api');
-    Route::post('refresh', [LoginController::class, 'refresh'])->middleware('auth:api');
+    Route::post('refresh', [LoginController::class, 'refresh']);
     Route::get('me/permissions', [LoginController::class, 'getMyPermissions'])->middleware('auth:api');
     Route::get('me/sidebar-modules', [LoginController::class, 'getMySidebarModules'])->middleware('auth:api');
 
@@ -109,6 +109,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
 
 
     // Attendance
+    Route::get('attendance/stats', [AttendanceApiController::class, 'stats'])->middleware('permission:attendance.read');
     Route::get('attendance', [AttendanceApiController::class, 'index'])->middleware('permission:attendance.read');
     Route::post('attendance', [AttendanceApiController::class, 'store'])->middleware('permission:attendance.edit');
     Route::put('attendance/{id}', [AttendanceApiController::class, 'update'])->middleware('permission:attendance.edit');
@@ -158,16 +159,16 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::delete('departments/{department}', [HRApiController::class, 'destroyDepartment']);
 
     // Leave Management (Admin side)
-    Route::get('leaves', [LeaveApiController::class, 'index'])->middleware('permission:leave.read');
-    Route::get('leaves/{leaveRequest}', [LeaveApiController::class, 'show'])->middleware('permission:leave.read');
-    Route::post('leaves/{leaveRequest}/status', [LeaveApiController::class, 'updateStatus'])->middleware('permission:leave.edit');
+    Route::get('leaves', [LeaveApiController::class, 'index'])->middleware('permission:leaves.read');
+    Route::get('leaves/{leaveRequest}', [LeaveApiController::class, 'show'])->middleware('permission:leaves.read');
+    Route::post('leaves/{leaveRequest}/status', [LeaveApiController::class, 'updateStatus'])->middleware('permission:leaves.edit');
 
     // WFH Requests (Admin side)
-    Route::get('wfh-requests', [WfhApiController::class, 'index'])->middleware('permission:leave.read');
-    Route::get('wfh-requests/{wfhRequest}', [WfhApiController::class, 'show'])->middleware('permission:leave.read');
-    Route::put('wfh-requests/{wfhRequest}', [WfhApiController::class, 'update'])->middleware('permission:leave.edit');
-    Route::delete('wfh-requests/{wfhRequest}', [WfhApiController::class, 'destroy'])->middleware('permission:leave.delete');
-    Route::post('wfh-requests/{wfhRequest}/status', [WfhApiController::class, 'updateStatus'])->middleware('permission:leave.edit');
+    Route::get('wfh-requests', [WfhApiController::class, 'index'])->middleware('permission:leaves.read');
+    Route::get('wfh-requests/{wfhRequest}', [WfhApiController::class, 'show'])->middleware('permission:leaves.read');
+    Route::put('wfh-requests/{wfhRequest}', [WfhApiController::class, 'update'])->middleware('permission:leaves.edit');
+    Route::delete('wfh-requests/{wfhRequest}', [WfhApiController::class, 'destroy'])->middleware('permission:leaves.delete');
+    Route::post('wfh-requests/{wfhRequest}/status', [WfhApiController::class, 'updateStatus'])->middleware('permission:leaves.edit');
 
     // Leave Types (Admin side)
     Route::apiResource('leave-types', LeaveTypeApiController::class)->middleware('permission:settings.read');
@@ -178,9 +179,9 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::post('working-hours', [WorkingHourApiController::class, 'store'])->middleware('permission:settings.edit');
 
     // Leave Allocations
-    Route::get('leave-allocations', [LeaveAllocationApiController::class, 'index'])->middleware('permission:leave.read');
-    Route::get('leave-allocations/{employee}', [LeaveAllocationApiController::class, 'show'])->middleware('permission:leave.read');
-    Route::post('leave-allocations/{employee}', [LeaveAllocationApiController::class, 'update'])->middleware('permission:leave.edit');
+    Route::get('leave-allocations', [LeaveAllocationApiController::class, 'index'])->middleware('permission:leaves.read');
+    Route::get('leave-allocations/{employee}', [LeaveAllocationApiController::class, 'show'])->middleware('permission:leaves.read');
+    Route::post('leave-allocations/{employee}', [LeaveAllocationApiController::class, 'update'])->middleware('permission:leaves.edit');
 
     // Task Reports (Admin)
     Route::apiResource('task-reports', AdminTaskReportApiController::class)->middleware('permission:reports.read');
@@ -196,6 +197,8 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::get('company-nearest-expiry', [ReportApiController::class, 'companyNearestExpiry']);
         Route::get('company-upcoming-renewals', [ReportApiController::class, 'companyUpcomingRenewals']);
         Route::get('pending-leaves', [ReportApiController::class, 'pendingLeavesReport']);
+        Route::get('task-reports', [ReportApiController::class, 'taskReport']);
+        Route::get('task-reports/export', [ReportApiController::class, 'taskReportExport']);
         Route::post('export', [ReportApiController::class, 'export'])->middleware('permission:reports.read');
     });
 

@@ -25,6 +25,88 @@ use OpenApi\Attributes as OA;
 class AttendanceApiController extends ApiController
 {
     /**
+     * Get Detailed Attendance Stats
+     */
+    #[OA\Get(
+        path: '/api/admin/attendance/stats',
+        operationId: 'getAttendanceStats',
+        summary: 'Get detailed attendance stats with employee lists',
+        description: 'Retrieves total, punched in, punched out, absent, and late counts along with employee details for each category for today.',
+        security: [['bearerAuth' => []]],
+        tags: ['Attendance']
+    )]
+    public function stats(Request $request): JsonResponse
+    {
+        $today = Carbon::today()->toDateString();
+
+        // Get all active, non-admin employees
+        $employees = Employee::with('user')->whereHas('user', function ($query) {
+            $query->where('status', 'active')->where('type', '!=', 'admin');
+        })->get();
+
+        // Get today's attendance logs
+        $todayLogs = AttendanceLog::whereDate('log_date', $today)
+            ->select('userid', DB::raw('MIN(punch_in) as punch_in'), DB::raw('MAX(punch_out) as punch_out'))
+            ->groupBy('userid')
+            ->get()
+            ->keyBy('userid'); // assuming userid in AttendanceLog is employee_id (string) or user_id (int). Based on codebase, it's usually employee_id or user_id. Wait, AttendanceLog uses user_id or employee_id?
+            // In DashboardApiController: $todayLogs = AttendanceLog::whereDate('log_date', $today)... ->groupBy('userid')->get();
+            // Let's assume userid maps to user_id or employee_id. The previous code uses it.
+            // Let's key by userid to easily check.
+
+        $result = [
+            'total' => ['count' => 0, 'employees' => []],
+            'punched_in' => ['count' => 0, 'employees' => []],
+            'punched_out' => ['count' => 0, 'employees' => []],
+            'absent' => ['count' => 0, 'employees' => []],
+            'late' => ['count' => 0, 'employees' => []],
+        ];
+
+        foreach ($employees as $employee) {
+            // Need to know what 'userid' in AttendanceLog refers to.
+            // In Employee model, attendanceLogs() has 'userid' referencing 'employee_id'.
+            // In DashboardApiController: userid is used. Let's use both user_id and employee_id to be safe, or just employee_id based on the model relation.
+            // Actually, in DashboardApiController: $activeEmployees - $punchedInCount. So it just uses count.
+            // Let's check employee->employee_id or employee->user_id against log->userid.
+            $log = $todayLogs->get($employee->employee_id) ?? $todayLogs->get($employee->user_id);
+
+            $empData = [
+                'id' => $employee->id,
+                'employee_id' => $employee->employee_id,
+                'user_id' => $employee->user_id,
+                'name' => trim($employee->first_name . ' ' . $employee->last_name),
+                'email' => $employee->user ? $employee->user->email : null,
+            ];
+
+            $result['total']['count']++;
+            $result['total']['employees'][] = $empData;
+
+            if ($log && $log->punch_in) {
+                // Punched in
+                $result['punched_in']['count']++;
+                $result['punched_in']['employees'][] = $empData;
+
+                $punchInTime = Carbon::parse($log->punch_in)->format('H:i:s');
+                if ($punchInTime >= '08:11:00' && $punchInTime <= '12:00:00') {
+                    $result['late']['count']++;
+                    $result['late']['employees'][] = $empData;
+                }
+
+                if ($log->punch_out && Carbon::parse($log->punch_out)->format('H:i:s') >= '12:00:00') {
+                    $result['punched_out']['count']++;
+                    $result['punched_out']['employees'][] = $empData;
+                }
+            } else {
+                // Absent
+                $result['absent']['count']++;
+                $result['absent']['employees'][] = $empData;
+            }
+        }
+
+        return $this->success($result);
+    }
+
+    /**
      * Get Attendance Summary with Stats
      */
     #[OA\Get(
@@ -495,7 +577,7 @@ class AttendanceApiController extends ApiController
             DB::raw("MAX(punch_out) as punch_out")
         )
             ->groupBy('company_id', 'userid', 'log_date')
-            ->havingRaw("TIME(MIN(punch_in)) > '08:10:59' AND TIME(MIN(punch_in)) <= '12:00:00'");
+            ->havingRaw("TIME(MIN(punch_in)) > '10:00:01' AND TIME(MIN(punch_in)) <= '12:00:00'");
 
         if ($request->filled('company_id')) {
             $query->where('company_id', $request->company_id);

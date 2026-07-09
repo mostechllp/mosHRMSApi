@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Exports\AttendanceExport;
 use App\Exports\LeaveExport;
 use App\Exports\EmployeeExport;
+use App\Exports\TaskReportExport;
 use App\Models\AttendanceLog;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
@@ -13,6 +14,7 @@ use App\Models\Department;
 use App\Models\Designation;
 use App\Models\Company;
 use App\Models\User;
+use App\Models\WorkingHour;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
@@ -33,97 +35,185 @@ class ReportApiController extends ApiController
         $employeeId = $request->get('employee_id');
         $departmentId = $request->get('department_id');
         $search = $request->get('search');
-        $perPage = $request->get('per_page', 10);
+        $perPage = $request->get('per_page', 500);
 
         // Get start and end dates
-        list($startDate, $endDate) = $this->getDateRange(
+        [$startDate, $endDate] = $this->getDateRange(
             $dateRange,
             $request->get('from_date'),
             $request->get('to_date')
         );
 
-        // Employees query with user relations
-        $employeesQuery = Employee::with(['user.company', 'user.department', 'user.designation'])
-            ->whereRelation('user', 'status', 'active'); // Filter active users
+        // Employees query
+        $employeesQuery = Employee::with([
+            'user.company',
+            'user.department',
+            'user.designation'
+        ])
+            ->whereHas('user', function ($query) {
+                $query->where('status', 'active')
+                    ->where('type', 'employee');
+            });
 
-        // Filter by employee_id
+        // Filter by employee ID
         if ($employeeId && $employeeId !== 'all') {
             $employeesQuery->where('employee_id', $employeeId);
         }
 
         // Filter by department
         if ($departmentId && $departmentId !== 'all') {
-            $employeesQuery->whereRelation('user', 'department_id', $departmentId);
+            $employeesQuery->whereHas('user', function ($query) use ($departmentId) {
+                $query->where('department_id', $departmentId);
+            });
         }
 
-        // Search filter
+        // Search
         if ($search) {
-            $employeesQuery->where(function ($q) use ($search) {
-                $q->where('first_name', 'like', "%{$search}%")
+            $employeesQuery->where(function ($query) use ($search) {
+                $query->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%")
                     ->orWhere('employee_id', 'like', "%{$search}%");
             });
         }
 
         $employees = $employeesQuery->get();
-        $employeeIds = $employees->pluck('employee_id')->toArray();
 
-        // Fetch attendance logs for selected employees within date range
+        if ($employees->isEmpty()) {
+            return $this->success([
+                'data' => [],
+                'meta' => [
+                    'total' => 0,
+                    'per_page' => (int) $perPage,
+                    'current_page' => 1,
+                    'last_page' => 0
+                ]
+            ]);
+        }
+
+        $userIds = $employees->pluck('user_id')->toArray();
+
+        // Fetch working hour configuration keyed by lowercase day name
+        $workingHours = WorkingHour::all()->keyBy(fn($wh) => strtolower($wh->day));
+
+        // Attendance logs
         $allLogs = AttendanceLog::whereBetween('log_date', [$startDate, $endDate])
-            ->whereIn('userid', $employeeIds)
+            ->whereIn('userid', $userIds)
+            ->orderBy('log_date')
             ->get()
             ->groupBy(['log_date', 'userid']);
 
         $reportData = [];
-        $tempDate = Carbon::parse($startDate);
-        $end = Carbon::parse($endDate);
 
-        // Build report data
-        while ($tempDate <= $end) {
-            $dateStr = $tempDate->toDateString();
-            $dayLogs = $allLogs->get($dateStr, collect());
+        $currentDate = Carbon::parse($startDate);
+        $lastDate = Carbon::parse($endDate);
 
-            foreach ($employees as $emp) {
-                $empLogs = $dayLogs->get($emp->employee_id);
-                $punchIn = $empLogs ? $empLogs->min('punch_in') : null;
-                $punchOut = $empLogs ? $empLogs->max('punch_out') : null;
+        while ($currentDate->lte($lastDate)) {
 
-                $status = 'Absent';
+            $date = $currentDate->toDateString();
+            $dayLogs = $allLogs->get($date, collect());
+
+            // Determine standard hours for this day from WorkingHour config
+            $dayName = strtolower($currentDate->format('l')); // e.g. 'monday'
+            $workingHourConfig = $workingHours->get($dayName);
+            $standardHours = 8; // default fallback
+            if ($workingHourConfig && $workingHourConfig->is_enabled && $workingHourConfig->start_time && $workingHourConfig->end_time) {
+                $configStart = Carbon::createFromTimeString($workingHourConfig->start_time);
+                $configEnd = Carbon::createFromTimeString($workingHourConfig->end_time);
+                $standardHours = round($configStart->diffInMinutes($configEnd) / 60, 2);
+            }
+
+            foreach ($employees as $employee) {
+
+                $attendance = $dayLogs->get($employee->user_id)?->first();
+
+                $punchIn = $attendance?->punch_in;
+                $punchOut = $attendance?->punch_out;
+
+                $workedHours = 0;
+                $overtimeMinutes = 0;
+
                 if ($punchIn) {
-                    $time = Carbon::parse($punchIn)->format('H:i:s');
-                    $status = ($time > '08:10:59' && $time <= '12:00:00') ? 'Late' : 'Present';
+                    $status = 'Present';
+                } else {
+                    $status = 'Absent';
+                }
+
+                if ($punchIn && $punchOut) {
+
+                    $punchInTime = Carbon::parse($punchIn);
+                    $punchOutTime = Carbon::parse($punchOut);
+
+                    $workedMinutes = $punchInTime->diffInMinutes($punchOutTime);
+                    $workedHours = round($workedMinutes / 60, 2);
+
+                    if ($workedHours >= 8) {
+
+                        $status = 'Full Day';
+
+                    } elseif ($workedHours >= 4) {
+
+                        $status = 'Half Day';
+
+                    } else {
+
+                        $status = 'Absent';
+                    }
+
+                    // Overtime in minutes beyond the standard configured hours
+                    $overtimeMinutes = max(0, (int) round(($workedHours - $standardHours) * 60));
                 }
 
                 $reportData[] = [
-                    'employee_id' => $emp->employee_id,
-                    'name' => $emp->first_name . ' ' . $emp->last_name,
-                    'department' => $emp->user->department->name ?? 'N/A',
-                    'date' => $dateStr,
-                    'punch_in' => $punchIn ? Carbon::parse($punchIn)->format('H:i') : '-',
-                    'punch_out' => $punchOut ? Carbon::parse($punchOut)->format('H:i') : '-',
-                    'status' => $status
+                    'employee_id' => $employee->employee_id,
+                    'name' => trim($employee->first_name . ' ' . $employee->last_name),
+                    'department' => $employee->user->department->name ?? 'N/A',
+                    'designation' => $employee->user->designation->name ?? 'N/A',
+                    'company' => $employee->user->company->name ?? 'N/A',
+                    'date' => $date,
+                    'punch_in' => $punchIn
+                        ? Carbon::parse($punchIn)->format('h:i A')
+                        : '-',
+                    'punch_out' => $punchOut
+                        ? Carbon::parse($punchOut)->format('h:i A')
+                        : '-',
+                    'worked_hours' => $workedHours,
+                    'standard_hours' => $standardHours,
+                    'overtime' => $this->formatOvertimeMinutes($overtimeMinutes),
+                    'status' => $status,
                 ];
             }
-            $tempDate->addDay();
+
+            $currentDate->addDay();
         }
 
-        // Sort by date descending
+        // Sort by latest date first
         usort($reportData, function ($a, $b) {
+
+            if ($a['date'] === $b['date']) {
+                return strcmp($a['employee_id'], $b['employee_id']);
+            }
+
             return strcmp($b['date'], $a['date']);
         });
 
         // Pagination
-        $currentPage = $request->get('page', 1);
+        $currentPage = (int) $request->get('page', 1);
+
         $total = count($reportData);
-        $paginatedItems = array_slice($reportData, ($currentPage - 1) * $perPage, $perPage);
+
+        $paginatedItems = array_slice(
+            $reportData,
+            ($currentPage - 1) * $perPage,
+            $perPage
+        );
 
         return $this->success([
-            'data' => $paginatedItems,
+            'data' => array_values($paginatedItems),
             'meta' => [
                 'total' => $total,
                 'per_page' => (int) $perPage,
-                'current_page' => (int) $currentPage,
-                'last_page' => ceil($total / $perPage)
+                'current_page' => $currentPage,
+                'last_page' => (int) ceil($total / $perPage),
             ]
         ]);
     }
@@ -309,10 +399,10 @@ class ReportApiController extends ApiController
 
         return match ($reportType) {
             'attendance' => $this->attendanceExport($request),
-            'leave'      => $this->leaveExport($request),
-            'employee'   => $this->employeeExport($request),
+            'leave' => $this->leaveExport($request),
+            'employee' => $this->employeeExport($request),
             'task_report' => $this->taskReportExport($request),
-            default      => $this->error('Invalid report type', 400),
+            default => $this->error('Invalid report type', 400),
         };
     }
 
@@ -326,8 +416,10 @@ class ReportApiController extends ApiController
         list($startDate, $endDate) = $this->getDateRange($dateRange, $request->get('from_date'), $request->get('to_date'));
 
         $empQuery = Employee::with(['user.department'])->whereRelation('user', 'status', 'active');
-        if ($employeeId && $employeeId !== 'all') $empQuery->where('employee_id', $employeeId);
-        if ($departmentId && $departmentId !== 'all') $empQuery->whereRelation('user', 'department_id', $departmentId);
+        if ($employeeId && $employeeId !== 'all')
+            $empQuery->where('employee_id', $employeeId);
+        if ($departmentId && $departmentId !== 'all')
+            $empQuery->whereRelation('user', 'department_id', $departmentId);
 
         $employees = $empQuery->get();
         $employeeIds = $employees->pluck('employee_id')->toArray();
@@ -375,8 +467,10 @@ class ReportApiController extends ApiController
                 $q->whereBetween('start_date', [$startDate, $endDate])->orWhereBetween('end_date', [$startDate, $endDate]);
             });
 
-        if ($employeeId && $employeeId !== 'all') $query->whereHas('employee', fn($q) => $q->where('employee_id', $employeeId));
-        if ($departmentId && $departmentId !== 'all') $query->whereHas('employee.user', fn($q) => $q->where('department_id', $departmentId));
+        if ($employeeId && $employeeId !== 'all')
+            $query->whereHas('employee', fn($q) => $q->where('employee_id', $employeeId));
+        if ($departmentId && $departmentId !== 'all')
+            $query->whereHas('employee.user', fn($q) => $q->where('department_id', $departmentId));
 
         $data = [];
         foreach ($query->get() as $leave) {
@@ -393,8 +487,10 @@ class ReportApiController extends ApiController
         $companyId = $request->get('company_id');
 
         $query = Employee::with(['user.company', 'user.department', 'user.designation'])->whereRelation('user', 'status', 'active');
-        if ($departmentId && $departmentId !== 'all') $query->whereRelation('user', 'department_id', $departmentId);
-        if ($companyId && $companyId !== 'all') $query->whereHas('user', fn($q) => $q->where('company_id', $companyId));
+        if ($departmentId && $departmentId !== 'all')
+            $query->whereRelation('user', 'department_id', $departmentId);
+        if ($companyId && $companyId !== 'all')
+            $query->whereHas('user', fn($q) => $q->where('company_id', $companyId));
 
         $data = [];
         foreach ($query->get() as $emp) {
@@ -404,24 +500,183 @@ class ReportApiController extends ApiController
         return $this->downloadResponse(new EmployeeExport($data), "employee_report", $request->get('format'));
     }
 
+    /**
+     * Task Report Listing — with date in dd/MM/yyyy, employee name, and task fields.
+     * Searchable by date range (from_date / to_date, or date_range preset) and employee name.
+     */
+    public function taskReport(Request $request): JsonResponse
+    {
+        $perPage = $request->get('per_page', 15);
+        $fromDate = $request->get('from_date');
+        $toDate = $request->get('to_date');
+        $dateRange = $request->get('date_range');
+        $search = $request->get('search'); // employee name or id
+
+        $query = TaskReport::with(['user.employee']);
+
+        // Date range filtering
+        if ($fromDate && $toDate) {
+            // Accept dd/MM/yyyy or Y-m-d
+            try {
+                $start = strlen($fromDate) === 10 && substr($fromDate, 2, 1) === '/'
+                    ? Carbon::createFromFormat('d/m/Y', $fromDate)->toDateString()
+                    : Carbon::parse($fromDate)->toDateString();
+                $end = strlen($toDate) === 10 && substr($toDate, 2, 1) === '/'
+                    ? Carbon::createFromFormat('d/m/Y', $toDate)->toDateString()
+                    : Carbon::parse($toDate)->toDateString();
+                $query->whereBetween('date', [$start, $end]);
+            } catch (\Exception $e) {
+                // ignore invalid date; fall through
+            }
+        } elseif ($dateRange) {
+            [$startDate, $endDate] = $this->getDateRange($dateRange);
+            $query->whereBetween('date', [$startDate, $endDate]);
+        }
+
+        // Search by employee name or employee ID string
+        if ($search) {
+            $query->whereHas('user.employee', function ($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('employee_id', 'like', "%{$search}%");
+            });
+        }
+
+        $reports = $query->latest('date')->paginate($perPage);
+
+        // Transform to the required output shape
+        $transformed = $reports->getCollection()->map(function ($report) {
+            $employee = $report->user->employee ?? null;
+            return [
+                'id' => $report->id,
+                'report_date' => $report->date
+                    ? Carbon::parse($report->date)->format('d/m/Y')
+                    : null,
+                'employee_id' => $employee->employee_id ?? 'N/A',
+                'employee_name' => $employee
+                    ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
+                    : ($report->user->username ?? 'N/A'),
+                'tasks_completed' => $report->tasks_completed,
+                'pending_tasks' => $report->pending_tasks,
+                'plan_tomorrow' => $report->plan_tomorrow,
+                'remarks' => $report->remarks,
+                'created_at' => $report->created_at,
+                'updated_at' => $report->updated_at,
+            ];
+        });
+
+        return $this->success([
+            'data' => $transformed,
+            'meta' => [
+                'total' => $reports->total(),
+                'per_page' => $reports->perPage(),
+                'current_page' => $reports->currentPage(),
+                'last_page' => $reports->lastPage(),
+            ],
+        ]);
+    }
+
     public function taskReportExport(Request $request)
     {
         $this->authenticateFromToken($request);
+        $format    = strtolower($request->get('format', 'csv'));
         $dateRange = $request->get('date_range', 'today');
-        $employeeId = $request->get('employee_id');
+        $fromDate  = $request->get('from_date');
+        $toDate    = $request->get('to_date');
+        $search    = $request->get('search');
 
-        list($startDate, $endDate) = $this->getDateRange($dateRange, $request->get('from_date'), $request->get('to_date'));
+        $taskQuery = TaskReport::with(['user.employee']);
 
-        $taskQuery = TaskReport::with(['employee.user'])->whereBetween('date', [$startDate, $endDate]);
-        if ($employeeId && $employeeId !== 'all') $taskQuery->where('employee_id', $employeeId);
-
-        $data = [];
-        $columns = ['Date', 'Employee ID', 'Name', 'Tasks Completed', 'Plan for Tomorrow', 'Remarks'];
-        foreach ($taskQuery->latest('date')->get() as $report) {
-            $data[] = [$report->date, $report->employee->employee_id ?? 'N/A', ($report->employee->first_name ?? '') . ' ' . ($report->employee->last_name ?? ''), $report->tasks_completed, $report->plan_tomorrow, $report->remarks];
+        // Resolve date range
+        $periodLabel = null;
+        if ($fromDate && $toDate) {
+            try {
+                $start = strlen($fromDate) === 10 && substr($fromDate, 2, 1) === '/'
+                    ? Carbon::createFromFormat('d/m/Y', $fromDate)->toDateString()
+                    : Carbon::parse($fromDate)->toDateString();
+                $end = strlen($toDate) === 10 && substr($toDate, 2, 1) === '/'
+                    ? Carbon::createFromFormat('d/m/Y', $toDate)->toDateString()
+                    : Carbon::parse($toDate)->toDateString();
+                $taskQuery->whereBetween('date', [$start, $end]);
+                $periodLabel = $start . ' to ' . $end;
+            } catch (\Exception $e) {
+                // fall through
+            }
+        } else {
+            [$startDate, $endDate] = $this->getDateRange($dateRange, $fromDate, $toDate);
+            $taskQuery->whereBetween('date', [$startDate, $endDate]);
+            $periodLabel = $startDate . ' to ' . $endDate;
         }
 
-        return $this->downloadResponse(new \App\Exports\GenericExport($data, $columns), "task_report", $request->get('format'));
+        // Search by employee name
+        if ($search) {
+            $taskQuery->whereHas('user.employee', function ($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('employee_id', 'like', "%{$search}%");
+            });
+        }
+
+        $records = $taskQuery->latest('date')->get();
+
+        // ── PDF: use dedicated styled template ──
+        if ($format === 'pdf') {
+            $rows = $records->map(function ($report) {
+                $employee = $report->user->employee ?? null;
+                return [
+                    'date'            => $report->date ? Carbon::parse($report->date)->format('d/m/Y') : '-',
+                    'employee_name'   => $employee
+                        ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
+                        : ($report->user->username ?? 'N/A'),
+                    'tasks_completed' => str_replace("\t", "    ", $report->tasks_completed ?? ''),
+                    'pending_tasks'   => str_replace("\t", "    ", $report->pending_tasks ?? ''),
+                    'plan_tomorrow'   => str_replace("\t", "    ", $report->plan_tomorrow ?? ''),
+                    'remarks'         => str_replace("\t", "    ", $report->remarks ?? ''),
+                ];
+            })->values()->toArray();
+
+            $withRemarks = collect($rows)->filter(fn($r) => !empty($r['remarks']))->count();
+
+            $pdf = Pdf::loadView('reports.task_report_pdf', [
+                'rows'        => $rows,
+                'period'      => $periodLabel,
+                'total'       => count($rows),
+                'withRemarks' => $withRemarks,
+            ])->setPaper('a4', 'landscape');
+
+            $filename = 'task_report_' . now()->format('YmdHis') . '.pdf';
+            return $pdf->download($filename);
+        }
+
+        // ── Excel / CSV ──
+        $flatData = [];
+        foreach ($records as $report) {
+            $employee   = $report->user->employee ?? null;
+            $flatData[] = [
+                $report->date ? Carbon::parse($report->date)->format('d/m/Y') : 'N/A',
+                $employee->employee_id ?? 'N/A',
+                $employee
+                    ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
+                    : ($report->user->username ?? 'N/A'),
+                $report->tasks_completed ?? '',
+                $report->pending_tasks ?? '',
+                $report->plan_tomorrow ?? '',
+                $report->remarks ?? '',
+            ];
+        }
+
+        $filename  = 'task_report_' . now()->format('YmdHis');
+        $exportObj = new TaskReportExport($flatData);
+
+        // Clear all output buffers to prevent corrupted XLSX files
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        return match ($format) {
+            'xlsx'  => Excel::download($exportObj, $filename . '.xlsx', \Maatwebsite\Excel\Excel::XLSX),
+            default => Excel::download($exportObj, $filename . '.csv',  \Maatwebsite\Excel\Excel::CSV),
+        };
     }
 
     /**
@@ -450,6 +705,11 @@ class ReportApiController extends ApiController
      */
     private function downloadResponse($exportClass, $baseFilename, $format)
     {
+        // Clear all output buffers to prevent corrupted XLSX files
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
         $filename = $baseFilename . "_" . now()->format('YmdHis');
         $format = strtolower($format);
 
@@ -481,21 +741,49 @@ class ReportApiController extends ApiController
         $now = Carbon::now();
         switch ($preset) {
             case 'today':
-                return [$now->toDateString(), $now->toDateString()];
+                return [$now->copy()->toDateString(), $now->copy()->toDateString()];
             case 'yesterday':
-                $y = $now->subDay()->toDateString();
+                $y = $now->copy()->subDay()->toDateString();
                 return [$y, $y];
             case 'this_week':
-                return [$now->startOfWeek()->toDateString(), Carbon::now()->endOfWeek()->toDateString()];
+                return [$now->copy()->startOfWeek()->toDateString(), $now->copy()->endOfWeek()->toDateString()];
             case 'this_month':
-                return [$now->startOfMonth()->toDateString(), Carbon::now()->endOfMonth()->toDateString()];
+                return [$now->copy()->startOfMonth()->toDateString(), $now->copy()->endOfMonth()->toDateString()];
             case 'custom':
                 if ($from && $to) {
-                    return [Carbon::parse($from)->toDateString(), Carbon::parse($to)->toDateString()];
+                    return [
+                        Carbon::createFromFormat('Y-m-d', $from)->toDateString(),
+                        Carbon::createFromFormat('Y-m-d', $to)->toDateString(),
+                    ];
                 }
-                return [$now->toDateString(), $now->toDateString()];
+                return [$now->copy()->toDateString(), $now->copy()->toDateString()];
             default:
-                return [$now->toDateString(), $now->toDateString()];
+                return [$now->copy()->toDateString(), $now->copy()->toDateString()];
         }
+    }
+
+    /**
+     * Helper: Format overtime minutes into a human-readable string.
+     * Examples: 0 => '-', 30 => '30 mins', 60 => '1 hour', 75 => '1 hour 15 mins'
+     */
+    private function formatOvertimeMinutes(int $minutes): string
+    {
+        if ($minutes <= 0) {
+            return '-';
+        }
+
+        $hours = intdiv($minutes, 60);
+        $mins = $minutes % 60;
+
+        if ($hours > 0 && $mins > 0) {
+            $hourLabel = $hours === 1 ? '1 hour' : "{$hours} hours";
+            return "{$hourLabel} {$mins} mins";
+        }
+
+        if ($hours > 0) {
+            return $hours === 1 ? '1 hour' : "{$hours} hours";
+        }
+
+        return "{$mins} mins";
     }
 }

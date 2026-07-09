@@ -17,9 +17,14 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
-    'allowed_methods' => ['*'],
-
-    'allowed_origins' => ['*'],
+    'allowed_origins' => [
+        'https://mostech.ae',
+        'https://mostech.ae/Mostech-HRMS',
+        'https://mos-hrms.vercel.app',
+        'https://mos-hrms-git-dev-mostechllps-projects.vercel.app',
+        'http://localhost:5173',
+        'http://localhost:5174',
+    ],
 
     'allowed_origins_patterns' => [],
 
@@ -29,6 +34,6 @@ return [
 
     'max_age' => 0,
 
-    'supports_credentials' => true,
+    'supports_credentials' => false,
 
 ];

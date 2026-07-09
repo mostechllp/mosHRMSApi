@@ -19,7 +19,7 @@ class EmployeePortalApiController extends ApiController
     /**
      * Get Employee Dashboard Data
      */
-  public function dashboard(): JsonResponse
+    public function dashboard(): JsonResponse
     {
         $user = auth('api')->user();
         if (!$user)
@@ -55,8 +55,8 @@ class EmployeePortalApiController extends ApiController
 
             // Format working_minutes → "8 hrs 30 mins"
             $minutes = $attendance->working_hours ?? 0;
-            $hours   = intdiv($minutes, 60);
-            $mins    = $minutes % 60;
+            $hours = intdiv($minutes, 60);
+            $mins = $minutes % 60;
 
             if ($minutes == 0) {
                 $attendance->working_hours = '--';
@@ -112,8 +112,9 @@ class EmployeePortalApiController extends ApiController
         }
 
         // Leave stats
-        $totalLeavesTaken = LeaveRequest::where('employee_id', $employee->id)
+        $totalLeavesTaken = LeaveRequest::where('employee_id', $user->employee->id)
             ->where('status', 'approved')
+            ->whereYear('start_date', date('Y'))
             ->sum('duration_days');
 
         $leaveBalance = $employee->total_leaves_allocated - $totalLeavesTaken;
@@ -133,7 +134,7 @@ class EmployeePortalApiController extends ApiController
 
         // 3. Check for approved WFH request today
         if (!$canPunch) {
-            $canPunch = WfhRequest::where('employee_id', $employee->id)
+            $canPunch = WfhRequest::where('employee_id', $user->employee->id)
                 ->whereDate('date', $today)
                 ->where('status', 'Approved')
                 ->exists();
@@ -165,8 +166,8 @@ class EmployeePortalApiController extends ApiController
             ],
             'attendance_history' => $attendanceHistory,
             'can_punch' => $canPunch,
-            'pending_wfh_count' => WfhRequest::where('employee_id', $employee->id)->where('status', 'pending')->count(),
-            'recent_leaves' => LeaveRequest::where('employee_id', $employee->id)->latest()->take(5)->get(),
+            'pending_wfh_count' => WfhRequest::where('employee_id', $user->employee->id)->where('status', 'pending')->count(),
+            'recent_leaves' => LeaveRequest::where('employee_id', $user->employee->id)->latest()->take(5)->get(),
         ]);
     }
 
@@ -217,7 +218,7 @@ class EmployeePortalApiController extends ApiController
             'punch_in_latitude' => $request->punch_in_latitude,
             'punch_in_longitude' => $request->punch_in_longitude,
             'punch_in_address' => $request->punch_in_address,
-            
+
         ]);
 
         return $this->success($log, 'Punched in successfully.', 201);
@@ -228,99 +229,99 @@ class EmployeePortalApiController extends ApiController
      */
     public function punchOut(Request $request): JsonResponse
     {
-    $request->validate([
-        'punch_out_latitude' => 'nullable|numeric',
-        'punch_out_longitude' => 'nullable|numeric',
-        'punch_out_address' => 'nullable|string',
-        'tasks_completed' => 'required|string',
-        'pending_tasks'   => 'nullable|string',
-        'plan_tomorrow'   => 'nullable|string',
-        'remarks'         => 'nullable|string',
-        'punch_out_time'  => 'nullable|date',
-    ]);
+        $request->validate([
+            'punch_out_latitude' => 'nullable|numeric',
+            'punch_out_longitude' => 'nullable|numeric',
+            'punch_out_address' => 'nullable|string',
+            'tasks_completed' => 'required|string',
+            'pending_tasks' => 'nullable|string',
+            'plan_tomorrow' => 'nullable|string',
+            'remarks' => 'nullable|string',
+            'punch_out_time' => 'nullable|date',
+        ]);
 
-    $user = auth('api')->user();
+        $user = auth('api')->user();
 
-    if (!$user) {
-        return $this->error('Unauthorized', 401);
-    }
+        if (!$user) {
+            return $this->error('Unauthorized', 401);
+        }
 
-    $employee = $user->employee;
+        $employee = $user->employee;
 
-    if (!$employee) {
-        return $this->error('Employee profile not found', 404);
-    }
+        if (!$employee) {
+            return $this->error('Employee profile not found', 404);
+        }
 
-    // Find the oldest attendance record that has not been punched out
-    $log = AttendanceLog::where('userid', $user->id)
-        ->whereNull('punch_out')
-        ->orderBy('log_date', 'asc')
-        ->first();
+        // Find the oldest attendance record that has not been punched out
+        $log = AttendanceLog::where('userid', $user->id)
+            ->whereNull('punch_out')
+            ->orderBy('log_date', 'asc')
+            ->first();
 
-    if (!$log) {
-        return $this->error('No active punch-in found.', 400);
-    }
+        if (!$log) {
+            return $this->error('No active punch-in found.', 400);
+        }
 
-    $attendanceDate = Carbon::parse($log->log_date)->toDateString();
-    $punchOutTime = Carbon::parse($request->punch_out_time);
-    
-    //calculation of working hours
-    $punchIn = Carbon::parse($log->punch_in);
-    $workingMinutes = $punchIn->diffInMinutes($punchOutTime);
+        $attendanceDate = Carbon::parse($log->log_date)->toDateString();
+        $punchOutTime = Carbon::parse($request->punch_out_time);
 
-    // Validate punch out date matches attendance date
-    if ($punchOutTime->toDateString() !== $attendanceDate) {
-        return $this->error(
-            "Punch out time must belong to the attendance date {$attendanceDate}.",
-            422
+        //calculation of working hours
+        $punchIn = Carbon::parse($log->punch_in);
+        $workingMinutes = $punchIn->diffInMinutes($punchOutTime);
+
+        // Validate punch out date matches attendance date
+        if ($punchOutTime->toDateString() !== $attendanceDate) {
+            return $this->error(
+                "Punch out time must belong to the attendance date {$attendanceDate}.",
+                422
+            );
+        }
+
+        // Ensure punch out is after punch in
+        if ($log->punch_in && $punchOutTime->lt(Carbon::parse($log->punch_in))) {
+            return $this->error(
+                'Punch out time cannot be earlier than punch in time.',
+                422
+            );
+        }
+
+        // Save task report
+        TaskReport::updateOrCreate(
+            [
+                'employee_id' => $user->id,
+                'date' => $attendanceDate,
+            ],
+            [
+                'tasks_completed' => $request->tasks_completed,
+                'pending_tasks' => $request->pending_tasks,
+                'plan_tomorrow' => $request->plan_tomorrow,
+                'remarks' => $request->remarks,
+            ]
         );
+
+        // Update attendance log
+        $log->update([
+            'punch_out' => $punchOutTime,
+            'working_hours' => $workingMinutes,
+            'punch_out_latitude' => $request->latitude,
+            'punch_out_longitude' => $request->longitude,
+            'punch_out_address' => $request->address,
+            'log_status' => 'OUT',
+        ]);
+
+        $message = $attendanceDate === now()->toDateString()
+            ? 'Punched out successfully and task report submitted.'
+            : "Previous attendance dated {$attendanceDate} has been punched out successfully and task report submitted.";
+
+        return $this->success([
+            'attendance_date' => $attendanceDate,
+            'punch_in' => $log->punch_in,
+            'punch_out' => $punchOutTime,
+            'attendance_log' => $log->fresh(),
+        ], $message);
     }
 
-    // Ensure punch out is after punch in
-    if ($log->punch_in && $punchOutTime->lt(Carbon::parse($log->punch_in))) {
-        return $this->error(
-            'Punch out time cannot be earlier than punch in time.',
-            422
-        );
-    }
-
-    // Save task report
-    TaskReport::updateOrCreate(
-        [
-            'employee_id' => $user->id,
-            'date' => $attendanceDate,
-        ],
-        [
-            'tasks_completed' => $request->tasks_completed,
-            'pending_tasks'   => $request->pending_tasks,
-            'plan_tomorrow'   => $request->plan_tomorrow,
-            'remarks'         => $request->remarks,
-        ]
-    );
-
-    // Update attendance log
-    $log->update([
-        'punch_out'  => $punchOutTime,
-        'working_hours' => $workingMinutes,
-        'punch_out_latitude' => $request->latitude,
-        'punch_out_longitude' => $request->longitude,
-        'punch_out_address' => $request->address,
-        'log_status' => 'OUT',
-    ]);
-
-    $message = $attendanceDate === now()->toDateString()
-        ? 'Punched out successfully and task report submitted.'
-        : "Previous attendance dated {$attendanceDate} has been punched out successfully and task report submitted.";
-
-    return $this->success([
-        'attendance_date' => $attendanceDate,
-        'punch_in'        => $log->punch_in,
-        'punch_out'       => $punchOutTime,
-        'attendance_log'  => $log->fresh(),
-    ], $message);
-}
-
-     /**
+    /**
      * Start Break
      */
     public function startBreak(Request $request): JsonResponse
@@ -395,7 +396,7 @@ class EmployeePortalApiController extends ApiController
     public function leaves(): JsonResponse
     {
         $user = auth('api')->user();
-        $employee = $user ? $user : null;
+        $employee = $user ? $user->employee : null;
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
@@ -408,7 +409,7 @@ class EmployeePortalApiController extends ApiController
     public function leaveTypesAndBalance(): JsonResponse
     {
         $user = auth('api')->user();
-        $employee = $user ? $user : null;
+        $employee = $user ? $user->employee : null;
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
@@ -428,11 +429,13 @@ class EmployeePortalApiController extends ApiController
             $taken = (float) LeaveRequest::where('employee_id', $employee->id)
                 ->where('leave_type_id', $leaveType->id)
                 ->where('status', 'approved')
+                ->whereYear('start_date', $currentYear)
                 ->sum('duration_days');
 
             $pending = (float) LeaveRequest::where('employee_id', $employee->id)
                 ->where('leave_type_id', $leaveType->id)
                 ->where('status', 'pending')
+                ->whereYear('start_date', $currentYear)
                 ->sum('duration_days');
 
             $allocated = $allocation ? (float) $allocation->allocated_days : 0;
@@ -473,7 +476,7 @@ class EmployeePortalApiController extends ApiController
         ]);
 
         $user = auth('api')->user();
-        $employee = $user ? $user : null;
+        $employee = $user ? $user->employee : null;
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
@@ -501,6 +504,7 @@ class EmployeePortalApiController extends ApiController
         $leavesTaken = LeaveRequest::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
             ->whereIn('status', ['approved', 'pending'])
+            ->whereYear('start_date', $currentYear)
             ->sum('duration_days');
 
         $remainingBalance = $allocated - $leavesTaken;
