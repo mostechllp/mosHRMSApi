@@ -10,13 +10,32 @@ class Project extends Model
     use SoftDeletes;
 
     protected $fillable = [
-        'name',
+        'project_name',
         'description',
+        'client_name',
+        'client_contact',
+        'department_id',
+        'start_date',
+        'end_date',
+        'website_live_date',
+        'client_contacted_date',
+        'domain_name',
+        'domain_purchased_date',
+        'website_url',
+        'domain_expiry_date',
+        'domain_purchased_from',
+        'is_email_purchased',
+        'status',
         'project_manager_id',
         'team_lead_id',
         'created_by',
         'deleted_by',
     ];
+
+    public function emails()
+    {
+        return $this->hasMany(ProjectEmail::class);
+    }
 
     public function projectManager()
     {

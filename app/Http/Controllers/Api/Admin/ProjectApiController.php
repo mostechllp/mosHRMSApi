@@ -14,7 +14,7 @@ class ProjectApiController extends ApiController
      */
     public function index(): JsonResponse
     {
-        $projects = Project::latest()->get();
+        $projects = Project::with('emails')->latest()->get();
         return $this->success($projects);
     }
 
@@ -53,22 +53,39 @@ class ProjectApiController extends ApiController
      */
     public function store(Request $request): JsonResponse
     {
-        $request->validate([
-            'name' => 'required|string|max:255',
+        $validated = $request->validate([
+            'project_name' => 'required|string|max:255',
             'description' => 'nullable|string',
+            'client_name' => 'nullable|string|max:255',
+            'client_contact' => 'nullable|string|max:255',
+            'department_id' => 'nullable|exists:departments,id',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date',
+            'website_live_date' => 'nullable|date',
+            'client_contacted_date' => 'nullable|date',
+            'domain_name' => 'nullable|string|max:255',
+            'domain_purchased_date' => 'nullable|date',
+            'website_url' => 'nullable|string|max:255',
+            'domain_expiry_date' => 'nullable|date',
+            'domain_purchased_from' => 'nullable|string|max:255',
+            'is_email_purchased' => 'nullable|boolean',
+            'status' => 'nullable|in:Active,Completed,On-hold,In-progress',
             'project_manager_id' => 'nullable|exists:employees,id',
             'team_lead_id' => 'nullable|exists:employees,id',
+            'emails' => 'nullable|array',
+            'emails.*.email_name' => 'nullable|string|max:255',
+            'emails.*.purchase_date' => 'nullable|date',
+            'emails.*.expiry_date' => 'nullable|date',
         ]);
 
-        $project = Project::create([
-            'name' => $request->name,
-            'description' => $request->description,
-            'project_manager_id' => $request->project_manager_id,
-            'team_lead_id' => $request->team_lead_id,
-            'created_by' => auth()->id(),
-        ]);
+        $validated['created_by'] = auth()->id();
+        $project = Project::create($validated);
 
-        return $this->success($project, 'Project created successfully', 201);
+        if ($request->has('emails')) {
+            $project->emails()->createMany($request->emails);
+        }
+
+        return $this->success($project->load('emails'), 'Project created successfully', 201);
     }
 
     /**
@@ -76,7 +93,7 @@ class ProjectApiController extends ApiController
      */
     public function show(Project $project): JsonResponse
     {
-        return $this->success($project);
+        return $this->success($project->load('emails'));
     }
 
     /**
@@ -84,16 +101,39 @@ class ProjectApiController extends ApiController
      */
     public function update(Request $request, Project $project): JsonResponse
     {
-        $request->validate([
-            'name' => 'sometimes|required|string|max:255',
+        $validated = $request->validate([
+            'project_name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
+            'client_name' => 'nullable|string|max:255',
+            'client_contact' => 'nullable|string|max:255',
+            'department_id' => 'nullable|exists:departments,id',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date',
+            'website_live_date' => 'nullable|date',
+            'client_contacted_date' => 'nullable|date',
+            'domain_name' => 'nullable|string|max:255',
+            'domain_purchased_date' => 'nullable|date',
+            'website_url' => 'nullable|string|max:255',
+            'domain_expiry_date' => 'nullable|date',
+            'domain_purchased_from' => 'nullable|string|max:255',
+            'is_email_purchased' => 'nullable|boolean',
+            'status' => 'nullable|in:Active,Completed,On-hold,In-progress',
             'project_manager_id' => 'nullable|exists:employees,id',
             'team_lead_id' => 'nullable|exists:employees,id',
+            'emails' => 'nullable|array',
+            'emails.*.email_name' => 'required|string|max:255',
+            'emails.*.purchase_date' => 'nullable|date',
+            'emails.*.expiry_date' => 'nullable|date',
         ]);
 
-        $project->update($request->only(['name', 'description', 'project_manager_id', 'team_lead_id']));
+        $project->update($validated);
 
-        return $this->success($project, 'Project updated successfully');
+        if ($request->has('emails')) {
+            $project->emails()->delete();
+            $project->emails()->createMany($request->emails);
+        }
+
+        return $this->success($project->load('emails'), 'Project updated successfully');
     }
 
     /**

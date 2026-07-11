@@ -145,6 +145,9 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::get('project-assignments/{id}', [ProjectAssignmentApiController::class, 'show']);
     Route::post('employees/projects', [ProjectAssignmentApiController::class, 'assign']);
 
+    // Tasks
+    Route::apiResource('tasks', \App\Http\Controllers\Api\Admin\TaskApiController::class);
+
     // HR Modules
     Route::get('designations', [HRApiController::class, 'indexDesignations']);
     Route::post('designations', [HRApiController::class, 'storeDesignation']);

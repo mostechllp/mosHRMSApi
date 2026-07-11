@@ -10,14 +10,37 @@ return new class extends Migration
     {
         Schema::create('projects', function (Blueprint $table) {
             $table->id();
-            $table->string('name');
+            $table->string('project_name');
             $table->text('description')->nullable();
+            $table->string('client_name')->nullable();
+            $table->string('client_contact')->nullable();
+            $table->foreignId('department_id')->nullable()->constrained('departments')->nullOnDelete();
+            $table->date('start_date')->nullable();
+            $table->date('end_date')->nullable();
+            $table->date('website_live_date')->nullable();
+            $table->date('client_contacted_date')->nullable();
+            $table->string('domain_name')->nullable();
+            $table->date('domain_purchased_date')->nullable();
+            $table->string('website_url')->nullable();
+            $table->date('domain_expiry_date')->nullable();
+            $table->string('domain_purchased_from')->nullable();
+            $table->boolean('is_email_purchased')->default(false);
+            $table->enum('status', ['Active', 'Completed', 'On-hold', 'In-progress'])->default('Active');
             $table->foreignId('project_manager_id')->nullable()->constrained('users')->nullOnDelete();
             $table->foreignId('team_lead_id')->nullable()->constrained('users')->nullOnDelete();
             $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
             $table->foreignId('deleted_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();
             $table->softDeletes();
+        });
+
+        Schema::create('project_emails', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('project_id')->constrained('projects')->cascadeOnDelete();
+            $table->string('email_name');
+            $table->date('purchase_date')->nullable();
+            $table->date('expiry_date')->nullable();
+            $table->timestamps();
         });
 
         Schema::create('employee_project', function (Blueprint $table) {
@@ -60,6 +83,7 @@ return new class extends Migration
         Schema::dropIfExists('task_reports');
         Schema::dropIfExists('project_time_logs');
         Schema::dropIfExists('employee_project');
+        Schema::dropIfExists('project_emails');
         Schema::dropIfExists('projects');
     }
 };
