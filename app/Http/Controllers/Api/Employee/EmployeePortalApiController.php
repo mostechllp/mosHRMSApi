@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Employee;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Models\AttendanceLog;
+use App\Models\Task;
 use App\Models\TaskReport;
 use App\Models\WfhRequest;
 use App\Models\LeaveRequest;
@@ -140,6 +141,61 @@ class EmployeePortalApiController extends ApiController
                 ->exists();
         }
 
+        // ── Task sections ──────────────────────────────────────────────
+        $employeeId = $user->employee->id;
+
+        // Base query: all tasks assigned to this employee (with pivot status)
+        $baseTaskQuery = Task::with([
+            'project:id,project_name',
+            'assignedTo' => function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId)
+                    ->select('employees.id')
+                    ->withPivot('status');
+            }
+        ])
+            ->whereHas('assignedTo', function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId);
+            });
+
+        // Today's assigned tasks (assigned_date = today)
+        $todayAssignedTasks = (clone $baseTaskQuery)
+            ->whereDate('assigned_date', $today)
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
+
+        // All tasks
+        $allTasks = (clone $baseTaskQuery)
+            ->latest()
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
+
+        // Tasks in progress
+        $tasksInProgress = (clone $baseTaskQuery)
+            ->whereHas('assignedTo', function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId)
+                    ->where('task_employee.status', 'in_progress');
+            })
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
+
+        // Tasks completed
+        $tasksCompleted = (clone $baseTaskQuery)
+            ->whereHas('assignedTo', function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId)
+                    ->where('task_employee.status', 'completed');
+            })
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
+
+        // Tasks on hold
+        $tasksOnHold = (clone $baseTaskQuery)
+            ->whereHas('assignedTo', function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId)
+                    ->where('task_employee.status', 'on_hold');
+            })
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
+
         return $this->success([
             'employee' => $user->employee,
             'today_attendance' => [
@@ -168,7 +224,39 @@ class EmployeePortalApiController extends ApiController
             'can_punch' => $canPunch,
             'pending_wfh_count' => WfhRequest::where('employee_id', $user->employee->id)->where('status', 'pending')->count(),
             'recent_leaves' => LeaveRequest::where('employee_id', $user->employee->id)->latest()->take(5)->get(),
+            'tasks' => [
+                'today_assigned_tasks' => $todayAssignedTasks,
+                'all_tasks' => $allTasks,
+                'in_progress' => $tasksInProgress,
+                'completed' => $tasksCompleted,
+                'on_hold' => $tasksOnHold,
+            ],
         ]);
+    }
+
+    /**
+     * Format a Task for the employee's dashboard view.
+     * Extracts the current employee's pivot status from the assignedTo collection.
+     */
+    private function formatTaskForEmployee(Task $task, int $employeeId): array
+    {
+        // The pivot for this employee (loaded via assignedTo relationship)
+        $pivot = $task->assignedTo->firstWhere('id', $employeeId)?->pivot;
+
+        return [
+            'id' => $task->id,
+            'title' => $task->title,
+            'task_description' => $task->task_description,
+            'project' => $task->project ? [
+                'id' => $task->project->id,
+                'project_name' => $task->project->project_name,
+            ] : null,
+            'assigned_by' => $task->assigned_by,
+            'assigned_date' => $task->assigned_date,
+            'due_date' => $task->due_date,
+            'priority' => $task->priority,
+            'status' => $pivot?->status ?? 'assigned',
+        ];
     }
 
 
@@ -380,7 +468,8 @@ class EmployeePortalApiController extends ApiController
 
         $timezone = $request->input('timezone', config('app.timezone'));
         $now = Carbon::now($timezone);
-        $duration = $activeBreak->start_time->diffInMinutes($now);
+        $durationInSeconds = $activeBreak->start_time->diffInSeconds($now);
+        $duration = (int) ceil($durationInSeconds / 60);
 
         $activeBreak->update([
             'end_time' => $now,
@@ -389,6 +478,43 @@ class EmployeePortalApiController extends ApiController
 
         return $this->success($activeBreak, 'Break ended successfully.');
     }
+
+    /**
+     * Get Breaks by date
+     */
+    public function getBreaks(Request $request): JsonResponse
+    {
+        $request->validate([
+            'date' => 'nullable|date',
+        ]);
+
+        $user = auth('api')->user();
+        if (!$user || !$user->employee) {
+            return $this->error('Employee profile not found', 404);
+        }
+
+        $date = $request->input('date', Carbon::today()->toDateString());
+
+        $log = AttendanceLog::with('breaks')
+            ->where('userid', $user->id)
+            ->whereDate('log_date', $date)
+            ->first();
+
+        if (!$log) {
+            return $this->success([
+                'date' => $date,
+                'breaks' => [],
+                'total_break_minutes' => 0
+            ], 'No attendance log found for the given date.');
+        }
+
+        return $this->success([
+            'date' => $date,
+            'breaks' => $log->breaks,
+            'total_break_minutes' => $log->breaks->sum('duration_minutes')
+        ]);
+    }
+
 
     /**
      * Leaves

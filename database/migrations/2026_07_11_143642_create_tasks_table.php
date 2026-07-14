@@ -28,6 +28,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('task_id')->constrained('tasks')->cascadeOnDelete();
             $table->foreignId('employee_id')->constrained('employees')->cascadeOnDelete();
+            $table->enum('status', ['assigned', 'in_progress', 'completed', 'on_hold'])->default('assigned');
             $table->timestamps();
         });
     }

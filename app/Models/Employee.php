@@ -158,4 +158,11 @@ class Employee extends Model
     {
         return $this->hasMany(Offboarding::class);
     }
+
+    public function tasks()
+    {
+        return $this->belongsToMany(Task::class, 'task_employee')
+                    ->withPivot('status')
+                    ->withTimestamps();
+    }
 }

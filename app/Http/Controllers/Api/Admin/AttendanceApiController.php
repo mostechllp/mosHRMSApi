@@ -81,7 +81,7 @@ class AttendanceApiController extends ApiController
             $result['total']['count']++;
             $result['total']['employees'][] = $empData;
 
-            if ($log && $log->punch_in) {
+            if ($log && $log->punch_in && $log->punch_in !== '--') {
                 // Punched in
                 $result['punched_in']['count']++;
                 $result['punched_in']['employees'][] = $empData;
@@ -92,7 +92,7 @@ class AttendanceApiController extends ApiController
                     $result['late']['employees'][] = $empData;
                 }
 
-                if ($log->punch_out && Carbon::parse($log->punch_out)->format('H:i:s') >= '12:00:00') {
+                if ($log->punch_out && $log->punch_out !== '--' && Carbon::parse($log->punch_out)->format('H:i:s') >= '12:00:00') {
                     $result['punched_out']['count']++;
                     $result['punched_out']['employees'][] = $empData;
                 }
@@ -131,7 +131,7 @@ class AttendanceApiController extends ApiController
         $employeeName = $request->get('employee_name');
         $datePreset = $request->get('date_preset', 'all');
 
-        $query = AttendanceLog::with(['company', 'user.employee', 'user.department'])
+        $query = AttendanceLog::with(['company', 'user.employee', 'user.department', 'breaks'])
             ->select(
                 'id',
                 'company_id',
@@ -186,16 +186,16 @@ class AttendanceApiController extends ApiController
             $tz = config('app.timezone', 'Asia/Dubai');
 
             // Format date to dd/mm/yyyy
-            $log->log_date = $log->log_date
+            $log->log_date = ($log->log_date && $log->log_date !== '--')
                 ? Carbon::parse($log->log_date)->format('d/m/Y')
                 : '--';
 
-            $log->punch_in = $log->punch_in
+            $log->punch_in = ($log->punch_in && $log->punch_in !== '--')
                 ? Carbon::parse($log->punch_in)->setTimezone($tz)->format('h:i A')
                 : '--';
             // Output → "08 Jun 2026, 07:29 AM"
 
-            $log->punch_out = $log->punch_out
+            $log->punch_out = ($log->punch_out && $log->punch_out !== '--')
                 ? Carbon::parse($log->punch_out)->setTimezone($tz)->format('h:i A')
                 : '--';
             // Output → "08 Jun 2026, 12:32 PM"
@@ -213,6 +213,32 @@ class AttendanceApiController extends ApiController
                 $log->working_hours = "{$hours} hrs";
             else
                 $log->working_hours = "{$hours} hrs {$mins} mins";
+
+            if ($log->relationLoaded('breaks')) {
+                $log->breaks->transform(function ($break) use ($tz) {
+                    $break->start_time = ($break->start_time && $break->start_time !== '--')
+                        ? Carbon::parse($break->start_time)->setTimezone($tz)->format('h:i A')
+                        : '--';
+                    $break->end_time = ($break->end_time && $break->end_time !== '--')
+                        ? Carbon::parse($break->end_time)->setTimezone($tz)->format('h:i A')
+                        : '--';
+
+                    $b_minutes = $break->duration_minutes ?? 0;
+                    $b_hours = intdiv($b_minutes, 60);
+                    $b_mins = $b_minutes % 60;
+                    
+                    if ($b_minutes == 0)
+                        $break->formatted_duration = '--';
+                    elseif ($b_hours == 0)
+                        $break->formatted_duration = "{$b_mins} mins";
+                    elseif ($b_mins == 0)
+                        $break->formatted_duration = "{$b_hours} hrs";
+                    else
+                        $break->formatted_duration = "{$b_hours} hrs {$b_mins} mins";
+
+                    return $break;
+                });
+            }
 
             return $log;
         });
@@ -696,11 +722,11 @@ class AttendanceApiController extends ApiController
             ->get();
 
         $punchedInCount = $todayLogs->filter(function ($log) {
-            return $log->punch_in && Carbon::parse($log->punch_in)->format('H:i:s') <= '12:00:00';
+            return $log->punch_in && $log->punch_in !== '--' && Carbon::parse($log->punch_in)->format('H:i:s') <= '12:00:00';
         })->count();
 
         $punchedLateCount = $todayLogs->filter(function ($log) {
-            if (!$log->punch_in)
+            if (!$log->punch_in || $log->punch_in === '--')
                 return false;
             $time = Carbon::parse($log->punch_in)->format('H:i:s');
             return $time > '08:10:59' && $time <= '12:00:00';
@@ -712,7 +738,7 @@ class AttendanceApiController extends ApiController
             'absent_today' => max(0, $activeEmployeesCount - $todayLogs->count()),
             'punched_in_on_time' => $punchedInCount - $punchedLateCount,
             'punched_late' => $punchedLateCount,
-            'punched_out_today' => $todayLogs->filter(fn($l) => $l->punch_out && Carbon::parse($l->punch_out)->format('H:i:s') >= '12:00:00')->count()
+            'punched_out_today' => $todayLogs->filter(fn($l) => $l->punch_out && $l->punch_out !== '--' && Carbon::parse($l->punch_out)->format('H:i:s') >= '12:00:00')->count()
         ];
     }
 }

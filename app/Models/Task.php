@@ -27,6 +27,8 @@ class Task extends Model
 
     public function assignedTo()
     {
-        return $this->belongsToMany(Employee::class, 'task_employee');
+        return $this->belongsToMany(Employee::class, 'task_employee')
+                    ->withPivot('status')
+                    ->withTimestamps();
     }
 }

@@ -19,6 +19,23 @@ class TaskApiController extends ApiController
     }
 
     /**
+     * Get tasks for a specific project.
+     */
+    public function tasksByProject(int $projectId): JsonResponse
+    {
+        $tasks = Task::with(['assignedTo', 'project'])
+            ->where('project_id', $projectId)
+            ->latest()
+            ->get();
+
+        return $this->success([
+            'project_id' => $projectId,
+            'total' => $tasks->count(),
+            'tasks' => $tasks,
+        ]);
+    }
+
+    /**
      * Store a newly created resource in storage.
      */
     public function store(Request $request): JsonResponse
@@ -33,10 +50,11 @@ class TaskApiController extends ApiController
             'priority' => 'nullable|in:low,medium,high',
             'assigned_to' => 'required|array',
             'assigned_to.*' => 'exists:employees,id',
+            'status' => 'required|in:assigned,in_progress,completed,on_hold'
         ]);
 
         $task = Task::create($validated);
-        
+
         if ($request->has('assigned_to')) {
             $task->assignedTo()->attach($request->assigned_to);
         }
@@ -67,6 +85,7 @@ class TaskApiController extends ApiController
             'priority' => 'nullable|in:low,medium,high',
             'assigned_to' => 'nullable|array',
             'assigned_to.*' => 'exists:employees,id',
+            'status' => 'required|in:assigned,in_progress,completed,on_hold'
         ]);
 
         $task->update($validated);
