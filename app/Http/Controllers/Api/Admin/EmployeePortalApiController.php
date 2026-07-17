@@ -8,6 +8,7 @@ use App\Models\TaskReport;
 use App\Models\WfhRequest;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
+use App\Models\Employee;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -309,34 +310,67 @@ class EmployeePortalApiController extends ApiController
     public function storeLeave(Request $request): JsonResponse
     {
         $request->validate([
+            'employee_id' => 'required|exists:employees,id',
             'leave_type_id' => 'required|exists:leave_types,id',
             'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after_or_equal:start_date',
             'reason' => 'required|string|min:10',
             'claim_salary' => 'nullable|boolean',
             'document' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:2048',
+            'session1' => 'nullable|in:morning,afternoon',  // session for start date
+            'session2' => 'nullable|in:morning,afternoon',  // session for end date
+            'year' => 'nullable|integer',
         ]);
 
-        $user = auth('api')->user();
-        $employee = $user ? $user->employee : null;
+        $employee = Employee::find($request->employee_id);
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
-        $leaveType = \App\Models\LeaveType::find($request->leave_type_id);
+        $leaveType = LeaveType::find($request->leave_type_id);
 
         // Check for sick leave document
         if (str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document')) {
             return $this->error('Medical certificate is required for sick leave', 422);
         }
 
-        // Duration calculation
+        // ── Duration calculation based on session1 / session2 ──────────────────
+        // session1 = session for start_date: 'morning' (from morning = full) | 'afternoon' (from afternoon = half)
+        // session2 = session for end_date:   'morning' (until morning = half) | 'afternoon' (until afternoon = full)
         $start = Carbon::parse($request->start_date);
         $end = Carbon::parse($request->end_date);
-        $durationDays = $start->diffInDays($end) + 1;
+        $session1 = $request->input('session1', 'morning');   // default: full start day
+        $session2 = $request->input('session2', 'afternoon'); // default: full end day
+
+        $durationDays = 0.0;
+        $currentDate = $start->copy();
+
+        while ($currentDate->lte($end)) {
+            // Exclude Sundays (and holidays if applicable in future)
+            if ($currentDate->isSunday()) {
+                $currentDate->addDay();
+                continue;
+            }
+
+            if ($currentDate->isSameDay($start) && $currentDate->isSameDay($end)) {
+                if ($session1 === 'morning' && $session2 === 'afternoon') {
+                    $durationDays += 1.0;
+                } else {
+                    $durationDays += 0.5;
+                }
+            } elseif ($currentDate->isSameDay($start)) {
+                $durationDays += ($session1 === 'morning') ? 1.0 : 0.5;
+            } elseif ($currentDate->isSameDay($end)) {
+                $durationDays += ($session2 === 'afternoon') ? 1.0 : 0.5;
+            } else {
+                $durationDays += 1.0;
+            }
+
+            $currentDate->addDay();
+        }
 
         // Balance check
-        $currentYear = date('Y');
-        $allocation = \App\Models\LeaveAllocation::where('employee_id', $employee->id)
+        $currentYear = $request->input('year', date('Y'));
+        $allocation = LeaveAllocation::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
             ->where('year', $currentYear)
             ->first();
@@ -345,7 +379,7 @@ class EmployeePortalApiController extends ApiController
 
         $leavesTaken = LeaveRequest::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
-            ->whereIn('status', ['approved', 'pending'])
+            ->where('status', 'approved')
             ->sum('duration_days');
 
         $remainingBalance = $allocated - $leavesTaken;
@@ -362,8 +396,10 @@ class EmployeePortalApiController extends ApiController
         $leave = LeaveRequest::create([
             'employee_id' => $employee->id,
             'leave_type_id' => $request->leave_type_id,
-            'start_date' => $request->start_date,
-            'end_date' => $request->end_date,
+            'start_date' => $start,
+            'end_date' => $end,
+            'session1' => $request->input('session1', 'morning'),
+            'session2' => $request->input('session2', 'afternoon'),
             'duration_days' => $durationDays,
             'claim_salary' => $request->claim_salary ?? false,
             'document' => $documentPath,

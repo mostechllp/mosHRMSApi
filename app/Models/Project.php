@@ -54,4 +54,9 @@ class Project extends Model
             ->withPivot('assigned_by', 'deleted_by', 'deleted_at')
             ->wherePivot('deleted_at', null);
     }
+
+    public function department()
+    {
+        return $this->belongsTo(Department::class);
+    }
 }

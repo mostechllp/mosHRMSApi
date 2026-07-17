@@ -216,17 +216,13 @@ class AttendanceApiController extends ApiController
 
             if ($log->relationLoaded('breaks')) {
                 $log->breaks->transform(function ($break) use ($tz) {
-                    $break->start_time = ($break->start_time && $break->start_time !== '--')
-                        ? Carbon::parse($break->start_time)->setTimezone($tz)->format('h:i A')
-                        : '--';
-                    $break->end_time = ($break->end_time && $break->end_time !== '--')
-                        ? Carbon::parse($break->end_time)->setTimezone($tz)->format('h:i A')
-                        : '--';
+                    $break->start_time = $break->start_time ? Carbon::parse($break->start_time)->setTimezone($tz)->format('h:i A') : NULL;
+                    $break->end_time = $break->end_time ? Carbon::parse($break->end_time)->setTimezone($tz)->format('h:i A') : NULL;
 
                     $b_minutes = $break->duration_minutes ?? 0;
                     $b_hours = intdiv($b_minutes, 60);
                     $b_mins = $b_minutes % 60;
-                    
+
                     if ($b_minutes == 0)
                         $break->formatted_duration = '--';
                     elseif ($b_hours == 0)

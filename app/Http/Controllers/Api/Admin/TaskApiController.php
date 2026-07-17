@@ -12,9 +12,21 @@ class TaskApiController extends ApiController
     /**
      * Display a listing of the resource.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $tasks = Task::with(['assignedTo', 'project'])->latest()->get();
+        $query = Task::with(['assignedTo', 'project.department']);
+
+        if ($request->filled('project_id')) {
+            $query->where('project_id', $request->project_id);
+        }
+
+        if ($request->filled('department_id')) {
+            $query->whereHas('project', function ($q) use ($request) {
+                $q->where('department_id', $request->department_id);
+            });
+        }
+
+        $tasks = $query->latest()->paginate($request->input('per_page', 15));
         return $this->success($tasks);
     }
 
@@ -23,7 +35,7 @@ class TaskApiController extends ApiController
      */
     public function tasksByProject(int $projectId): JsonResponse
     {
-        $tasks = Task::with(['assignedTo', 'project'])
+        $tasks = Task::with(['assignedTo', 'project.department'])
             ->where('project_id', $projectId)
             ->latest()
             ->get();
@@ -59,7 +71,7 @@ class TaskApiController extends ApiController
             $task->assignedTo()->attach($request->assigned_to);
         }
 
-        return $this->success($task->load(['assignedTo', 'project']), 'Task created successfully', 201);
+        return $this->success($task->load(['assignedTo', 'project.department']), 'Task created successfully', 201);
     }
 
     /**
@@ -67,7 +79,7 @@ class TaskApiController extends ApiController
      */
     public function show(Task $task): JsonResponse
     {
-        return $this->success($task->load(['assignedTo', 'project']));
+        return $this->success($task->load(['assignedTo', 'project.department']));
     }
 
     /**
@@ -94,7 +106,7 @@ class TaskApiController extends ApiController
             $task->assignedTo()->sync($request->assigned_to);
         }
 
-        return $this->success($task->load(['assignedTo', 'project']), 'Task updated successfully');
+        return $this->success($task->load(['assignedTo', 'project.department']), 'Task updated successfully');
     }
 
     /**

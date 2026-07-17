@@ -123,6 +123,8 @@ class StoreEmployeeRequest extends FormRequest
             'educational_1st_page'  => 'nullable|string|starts_with:temp/',
             'educational_2nd_page'  => 'nullable|string|starts_with:temp/',
             'home_country_id_proof' => 'nullable|string|starts_with:temp/',
+            'aadhar_photo'          => 'nullable|string|starts_with:temp/',
+            'pan_photo'             => 'nullable|string|starts_with:temp/',
 
             // Details
             'visa_type' => 'nullable|in:company_visa,family_visa,other_visa',
@@ -139,6 +141,8 @@ class StoreEmployeeRequest extends FormRequest
             'eid_number' => 'nullable|string|max:255',
             'eid_issued_date' => 'nullable|date',
             'eid_expiry_date' => 'nullable|date',
+            'aadhar_number' => 'nullable|string|max:255',
+            'pan_number' => 'nullable|string|max:255',
             'moh_license_number' => 'nullable|string|max:255',
             'dependents' => 'nullable|string|max:255',
             'experience_level' => 'nullable|string|max:255',

@@ -58,6 +58,12 @@ return new class extends Migration
             $table->string('eid_1st_page')->nullable();
             $table->string('eid_2nd_page')->nullable();
 
+            // National IDs
+            $table->string('aadhar_number')->nullable();
+            $table->string('pan_number')->nullable();
+            $table->string('aadhar_photo')->nullable();
+            $table->string('pan_photo')->nullable();
+
             // Other documents
             $table->string('dependents')->nullable();
             $table->string('educational_1st_page')->nullable();

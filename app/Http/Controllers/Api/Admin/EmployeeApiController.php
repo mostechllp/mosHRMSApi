@@ -15,7 +15,8 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use App\Mail\UserRegistrationMail;
 use Illuminate\Http\JsonResponse;
-
+use App\Mail\UserEmailUpdatedMail;
+use Illuminate\Support\Facades\Log;
 class EmployeeApiController extends ApiController
 {
     public function index(Request $request): JsonResponse
@@ -104,6 +105,15 @@ class EmployeeApiController extends ApiController
         $data = $this->handleSpecialDays($request, $data);
         $userEmail = $data['company_email'] ?? $data['personal_email'];
 
+        $emailChanged = false;
+        $randomPassword = null;
+
+        if (array_key_exists('company_email', $data) && $data['company_email'] !== $employee->company_email) {
+            $emailChanged = true;
+            $randomPassword = Str::random(10);
+            $data['password'] = $randomPassword;
+        }
+
         // Update User part if User exists
         if ($employee->user) {
             $userData = [];
@@ -141,6 +151,14 @@ class EmployeeApiController extends ApiController
         unset($data['organization_id'], $data['company_id'], $data['department_id'], $data['designation_id'], $data['password'], $data['username'], $data['type']);
 
         $employee->update($data);
+
+        if ($emailChanged) {
+            try {
+                Mail::to($data['company_email'])->send(new UserEmailUpdatedMail($employee->user, $randomPassword, $employee));
+            } catch (\Exception $e) {
+                Log::error('Failed to send email on company email update: ' . $e->getMessage());
+            }
+        }
 
         $employee->load(['user.company', 'user.department', 'user.designation']);
 
@@ -233,7 +251,9 @@ class EmployeeApiController extends ApiController
             'eid_2nd_page',
             'educational_1st_page',
             'educational_2nd_page',
-            'home_country_id_proof'
+            'home_country_id_proof',
+            'aadhar_photo',
+            'pan_photo'
         ];
 
         foreach ($documentFields as $field) {

@@ -532,6 +532,21 @@ class EmployeePortalApiController extends ApiController
         ]);
     }
 
+    public function showLeave($id): JsonResponse
+    {
+        $user = auth('api')->user();
+        $employee = $user ? $user->employee : null;
+        if (!$employee)
+            return $this->error('Employee profile not found', 404);
+
+        $leave = LeaveRequest::with(['leaveType'])->where('employee_id', $employee->id)->find($id);
+
+        if (!$leave)
+            return $this->error('Leave request not found', 404);
+
+        return $this->success($leave);
+    }
+
     public function leaveTypesAndBalance(): JsonResponse
     {
         $user = auth('api')->user();
@@ -599,6 +614,8 @@ class EmployeePortalApiController extends ApiController
             'reason' => 'required|string|min:10',
             'claim_salary' => 'nullable|boolean',
             'document' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:2048',
+            'session1' => 'nullable|in:morning,afternoon',
+            'session2' => 'nullable|in:morning,afternoon',
         ]);
 
         $user = auth('api')->user();
@@ -613,10 +630,36 @@ class EmployeePortalApiController extends ApiController
             return $this->error('Medical certificate is required for sick leave', 422);
         }
 
-        // Duration calculation
         $start = Carbon::parse($request->start_date);
         $end = Carbon::parse($request->end_date);
-        $durationDays = $start->diffInDays($end) + 1;
+        $session1 = $request->session1;
+        $session2 = $request->session2;
+
+        $durationDays = 0.0;
+        $currentDate = $start->copy();
+
+        while ($currentDate->lte($end)) {
+            if ($currentDate->isSunday()) {
+                $currentDate->addDay();
+                continue;
+            }
+
+            if ($currentDate->isSameDay($start) && $currentDate->isSameDay($end)) {
+                if ($session1 === 'morning' && $session2 === 'afternoon') {
+                    $durationDays += 1.0;
+                } else {
+                    $durationDays += 0.5;
+                }
+            } elseif ($currentDate->isSameDay($start)) {
+                $durationDays += ($session1 === 'morning') ? 1.0 : 0.5;
+            } elseif ($currentDate->isSameDay($end)) {
+                $durationDays += ($session2 === 'afternoon') ? 1.0 : 0.5;
+            } else {
+                $durationDays += 1.0;
+            }
+
+            $currentDate->addDay();
+        }
 
         // Balance check
         $currentYear = date('Y');
@@ -629,7 +672,7 @@ class EmployeePortalApiController extends ApiController
 
         $leavesTaken = LeaveRequest::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
-            ->whereIn('status', ['approved', 'pending'])
+            ->where('status', 'approved')
             ->whereYear('start_date', $currentYear)
             ->sum('duration_days');
 
@@ -649,6 +692,8 @@ class EmployeePortalApiController extends ApiController
             'leave_type_id' => $request->leave_type_id,
             'start_date' => $request->start_date,
             'end_date' => $request->end_date,
+            'session1' => $session1,
+            'session2' => $session2,
             'duration_days' => $durationDays,
             'claim_salary' => $request->claim_salary ?? false,
             'document' => $documentPath,
@@ -657,6 +702,133 @@ class EmployeePortalApiController extends ApiController
         ]);
 
         return $this->success($leave, 'Leave request submitted successfully', 201);
+    }
+
+    public function updateLeave(Request $request, $id): JsonResponse
+    {
+        $request->validate([
+            'leave_type_id' => 'required|exists:leave_types,id',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'reason' => 'required|string|min:10',
+            'claim_salary' => 'nullable|boolean',
+            'document' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:2048',
+            'session1' => 'nullable|in:morning,afternoon',
+            'session2' => 'nullable|in:morning,afternoon',
+        ]);
+
+        $user = auth('api')->user();
+        $employee = $user ? $user->employee : null;
+        if (!$employee)
+            return $this->error('Employee profile not found', 404);
+
+        $leave = LeaveRequest::where('employee_id', $employee->id)->find($id);
+
+        if (!$leave) {
+            return $this->error('Leave request not found', 404);
+        }
+
+        if ($leave->status !== 'pending') {
+            return $this->error('Only pending leave requests can be updated.', 400);
+        }
+
+        $leaveType = LeaveType::find($request->leave_type_id);
+
+        if (str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document') && !$leave->document) {
+            return $this->error('Medical certificate is required for sick leave', 422);
+        }
+
+        $start = Carbon::parse($request->start_date);
+        $end = Carbon::parse($request->end_date);
+        $session1 = $request->session1;
+        $session2 = $request->session2;
+
+        $durationDays = 0.0;
+        $currentDate = $start->copy();
+
+        while ($currentDate->lte($end)) {
+            if ($currentDate->isSunday()) {
+                $currentDate->addDay();
+                continue;
+            }
+
+            if ($currentDate->isSameDay($start) && $currentDate->isSameDay($end)) {
+                if ($session1 === 'morning' && $session2 === 'afternoon') {
+                    $durationDays += 1.0;
+                } else {
+                    $durationDays += 0.5;
+                }
+            } elseif ($currentDate->isSameDay($start)) {
+                $durationDays += ($session1 === 'morning') ? 1.0 : 0.5;
+            } elseif ($currentDate->isSameDay($end)) {
+                $durationDays += ($session2 === 'afternoon') ? 1.0 : 0.5;
+            } else {
+                $durationDays += 1.0;
+            }
+
+            $currentDate->addDay();
+        }
+
+        $currentYear = date('Y');
+        $allocation = LeaveAllocation::where('employee_id', $employee->id)
+            ->where('leave_type_id', $request->leave_type_id)
+            ->where('year', $currentYear)
+            ->first();
+
+        $allocated = $allocation ? (float) $allocation->allocated_days : 0;
+
+        $leavesTaken = LeaveRequest::where('employee_id', $employee->id)
+            ->where('leave_type_id', $request->leave_type_id)
+            ->where('status', 'approved')
+            ->whereYear('start_date', $currentYear)
+            ->sum('duration_days');
+
+        $remainingBalance = $allocated - $leavesTaken;
+
+        if ($durationDays > $remainingBalance) {
+            return $this->error("Insufficient leave balance. You have only $remainingBalance days remaining.", 422);
+        }
+
+        $documentPath = $leave->document;
+        if ($request->hasFile('document')) {
+            $documentPath = $request->file('document')->store('leaves/documents', 'public');
+        }
+
+        $leave->update([
+            'leave_type_id' => $request->leave_type_id,
+            'start_date' => $request->start_date,
+            'end_date' => $request->end_date,
+            'session1' => $session1,
+            'session2' => $session2,
+            'duration_days' => $durationDays,
+            'claim_salary' => $request->claim_salary ?? false,
+            'document' => $documentPath,
+            'reason' => $request->reason,
+        ]);
+
+        return $this->success($leave, 'Leave request updated successfully');
+    }
+
+    public function destroyLeave($id): JsonResponse
+    {
+        $user = auth('api')->user();
+        $employee = $user ? $user->employee : null;
+        if (!$employee)
+            return $this->error('Employee profile not found', 404);
+
+        $leave = LeaveRequest::where('employee_id', $employee->id)->find($id);
+
+        if (!$leave) {
+            return $this->error('Leave request not found', 404);
+        }
+
+        if ($leave->status !== 'pending') {
+            return $this->error('Only pending leave requests can be deleted.', 400);
+        }
+
+        $leave->delete();
+
+        return $this->success(null, 'Leave request deleted successfully');
     }
 
     /**
