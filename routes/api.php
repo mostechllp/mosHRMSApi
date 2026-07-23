@@ -116,6 +116,9 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::post('attendance', [AttendanceApiController::class, 'store'])->middleware('permission:attendance.edit');
     Route::put('attendance/{id}', [AttendanceApiController::class, 'update'])->middleware('permission:attendance.edit');
     Route::delete('attendance/{id}', [AttendanceApiController::class, 'destroy'])->middleware('permission:attendance.delete');
+    Route::put('attendance/breaks/{id}', [AttendanceApiController::class, 'updateBreak'])->middleware('permission:attendance.edit');
+    Route::delete('attendance/breaks/{id}', [AttendanceApiController::class, 'destroyBreak'])->middleware('permission:attendance.delete');
+    Route::get('attendance/breaks/{id}', [AttendanceApiController::class, 'showBreak'])->middleware('permission:attendance.read');
     Route::post('attendance/upload', [AttendanceApiController::class, 'upload'])->middleware('permission:attendance.edit');
     Route::get('attendance/upload-status/{id}', [AttendanceApiController::class, 'uploadStatus'])->middleware('permission:attendance.read');
     Route::get('attendance/punch-in-today', [AttendanceApiController::class, 'punchInToday'])->middleware('permission:attendance.read');
@@ -292,6 +295,8 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'employee'], function () {
     // Attendance Requests
     Route::get('attendance-requests', [EmployeeAttendanceRequestApiController::class, 'index']);
     Route::post('attendance-requests', [EmployeeAttendanceRequestApiController::class, 'store']);
+    Route::put('attendance-requests/{attendanceRequest}', [EmployeeAttendanceRequestApiController::class, 'update']);
+    Route::delete('attendance-requests/{attendanceRequest}', [EmployeeAttendanceRequestApiController::class, 'destroy']);
 
     // Tasks (Employee side)
     Route::get('tasks', [EmployeeTaskApiController::class, 'index']);

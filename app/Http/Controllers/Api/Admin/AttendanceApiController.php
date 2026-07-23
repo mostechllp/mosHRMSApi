@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\Employee;
 use App\Models\User;
 use App\Models\AttendanceUpload;
+use App\Models\AttendanceBreak;
 use App\Jobs\ProcessAttendanceJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -736,5 +737,127 @@ class AttendanceApiController extends ApiController
             'punched_late' => $punchedLateCount,
             'punched_out_today' => $todayLogs->filter(fn($l) => $l->punch_out && $l->punch_out !== '--' && Carbon::parse($l->punch_out)->format('H:i:s') >= '12:00:00')->count()
         ];
+    }
+
+    /**
+     * Update Attendance Break
+     */
+    #[OA\Put(
+        path: '/api/admin/attendance/breaks/{id}',
+        operationId: 'updateAttendanceBreak',
+        summary: 'Update an existing attendance break',
+        description: 'Updates start time, end time, and duration of an attendance break.',
+        security: [['bearerAuth' => []]],
+        tags: ['Attendance']
+    )]
+    #[OA\Parameter(name: 'id', in: 'path', required: true, description: 'Attendance Break ID', schema: new OA\Schema(type: 'integer'))]
+    #[OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: 'start_time', type: 'string', format: 'date-time', example: '2026-06-07 09:00:00'),
+                new OA\Property(property: 'end_time', type: 'string', format: 'date-time', nullable: true, example: '2026-06-07 18:00:00'),
+            ]
+        )
+    )]
+    #[OA\Response(response: 200, description: 'Attendance break updated successfully')]
+    #[OA\Response(response: 404, description: 'Attendance break record not found')]
+    #[OA\Response(response: 422, description: 'Validation error')]
+    public function updateBreak(Request $request, $id): JsonResponse
+    {
+        try {
+            $break = AttendanceBreak::find($id);
+            if (!$break) {
+                return $this->error('Attendance break record not found', 404);
+            }
+
+            $request->validate([
+                'start_time' => 'sometimes|required|date_format:Y-m-d H:i:s',
+                'end_time'   => 'nullable|date_format:Y-m-d H:i:s|after_or_equal:start_time',
+            ]);
+
+            $startTime = $request->input('start_time', $break->start_time ? $break->start_time->format('Y-m-d H:i:s') : null);
+            $endTime = $request->input('end_time', $break->end_time ? $break->end_time->format('Y-m-d H:i:s') : null);
+
+            $durationMinutes = null;
+            if ($startTime && $endTime) {
+                $start = Carbon::parse($startTime);
+                $end = Carbon::parse($endTime);
+                $durationMinutes = (int) ceil($start->diffInSeconds($end) / 60);
+            }
+
+            $break->update([
+                'start_time' => $startTime,
+                'end_time' => $endTime,
+                'duration_minutes' => $durationMinutes,
+            ]);
+
+            return $this->success($break, 'Attendance break updated successfully.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->error($e->getMessage(), 422, $e->errors());
+        } catch (\Exception $e) {
+            Log::error('Attendance Break Update Error: ' . $e->getMessage());
+            return $this->error('Failed to update attendance break: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Delete Attendance Break
+     */
+    #[OA\Delete(
+        path: '/api/admin/attendance/breaks/{id}',
+        operationId: 'deleteAttendanceBreak',
+        summary: 'Delete an attendance break',
+        description: 'Deletes a specific attendance break.',
+        security: [['bearerAuth' => []]],
+        tags: ['Attendance']
+    )]
+    #[OA\Parameter(name: 'id', in: 'path', required: true, description: 'Attendance Break ID', schema: new OA\Schema(type: 'integer'))]
+    #[OA\Response(response: 200, description: 'Attendance break deleted successfully')]
+    #[OA\Response(response: 404, description: 'Attendance break record not found')]
+    public function destroyBreak($id): JsonResponse
+    {
+        try {
+            $break = AttendanceBreak::find($id);
+            if (!$break) {
+                return $this->error('Attendance break record not found', 404);
+            }
+
+            $break->delete();
+
+            return $this->success(null, 'Attendance break deleted successfully.');
+        } catch (\Exception $e) {
+            Log::error('Attendance Break Delete Error: ' . $e->getMessage());
+            return $this->error('Failed to delete attendance break: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get single Attendance Break
+     */
+    #[OA\Get(
+        path: '/api/admin/attendance/breaks/{id}',
+        operationId: 'showAttendanceBreak',
+        summary: 'Get details of a single attendance break',
+        description: 'Retrieves information for a specific attendance break by its ID.',
+        security: [['bearerAuth' => []]],
+        tags: ['Attendance']
+    )]
+    #[OA\Parameter(name: 'id', in: 'path', required: true, description: 'Attendance Break ID', schema: new OA\Schema(type: 'integer'))]
+    #[OA\Response(response: 200, description: 'Successful operation', content: new OA\JsonContent(properties: [new OA\Property(property: 'success', type: 'boolean', example: true), new OA\Property(property: 'data', type: 'object')]))]
+    #[OA\Response(response: 404, description: 'Attendance break record not found')]
+    public function showBreak($id): JsonResponse
+    {
+        try {
+            $break = AttendanceBreak::with('attendanceLog')->find($id);
+            if (!$break) {
+                return $this->error('Attendance break record not found', 404);
+            }
+
+            return $this->success($break);
+        } catch (\Exception $e) {
+            Log::error('Attendance Break Fetch Error: ' . $e->getMessage());
+            return $this->error('Failed to fetch attendance break: ' . $e->getMessage(), 500);
+        }
     }
 }

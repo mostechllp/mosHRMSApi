@@ -355,7 +355,9 @@ class EmployeePortalApiController extends ApiController
 
         //calculation of working hours
         $punchIn = Carbon::parse($log->punch_in);
-        $workingMinutes = $punchIn->diffInMinutes($punchOutTime);
+        $totalMinutes = $punchIn->diffInMinutes($punchOutTime);
+        $breakMinutes = (int) $log->breaks()->sum('duration_minutes');
+        $workingMinutes = max(0, $totalMinutes - $breakMinutes);
 
         // Validate punch out date matches attendance date
         if ($punchOutTime->toDateString() !== $attendanceDate) {
@@ -484,34 +486,42 @@ class EmployeePortalApiController extends ApiController
      */
     public function getBreaks(Request $request): JsonResponse
     {
-        $request->validate([
-            'date' => 'nullable|date',
-        ]);
-
         $user = auth('api')->user();
+
         if (!$user || !$user->employee) {
             return $this->error('Employee profile not found', 404);
         }
 
-        $date = $request->input('date', Carbon::today()->toDateString());
-
-        $log = AttendanceLog::with('breaks')
+        $attendanceLogs = AttendanceLog::with('breaks')
             ->where('userid', $user->id)
-            ->whereDate('log_date', $date)
-            ->first();
+            ->orderBy('log_date', 'desc')
+            ->get();
 
-        if (!$log) {
+        if ($attendanceLogs->isEmpty()) {
             return $this->success([
-                'date' => $date,
                 'breaks' => [],
-                'total_break_minutes' => 0
-            ], 'No attendance log found for the given date.');
+                'total_break_minutes' => 0,
+            ], 'No attendance logs found.');
         }
 
+        $breaks = $attendanceLogs->flatMap(function ($log) {
+            return $log->breaks->map(function ($break) use ($log) {
+                return [
+                    'id' => $break->id,
+                    'attendance_log_id' => $log->id,
+                    'date' => $log->log_date,
+                    'start_time' => $break->start_time,
+                    'end_time' => $break->end_time,
+                    'duration_minutes' => $break->duration_minutes,
+                    'created_at' => $break->created_at,
+                    'updated_at' => $break->updated_at,
+                ];
+            });
+        })->values();
+
         return $this->success([
-            'date' => $date,
-            'breaks' => $log->breaks,
-            'total_break_minutes' => $log->breaks->sum('duration_minutes')
+            'breaks' => $breaks,
+            'total_break_minutes' => $breaks->sum('duration_minutes'),
         ]);
     }
 
@@ -623,6 +633,19 @@ class EmployeePortalApiController extends ApiController
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
+        // Check if there are overlapping leaves
+        $hasOverlap = LeaveRequest::where('employee_id', $employee->id)
+            ->where('status', '!=', 'rejected')
+            ->where(function ($q) use ($request) {
+                $q->where('start_date', '<=', $request->end_date)
+                  ->where('end_date', '>=', $request->start_date);
+            })
+            ->exists();
+
+        if ($hasOverlap) {
+            return $this->error('You have already applied/taken leave on the selected date(s).', 422);
+        }
+
         $leaveType = LeaveType::find($request->leave_type_id);
 
         // Check for sick leave document
@@ -730,6 +753,20 @@ class EmployeePortalApiController extends ApiController
 
         if ($leave->status !== 'pending') {
             return $this->error('Only pending leave requests can be updated.', 400);
+        }
+
+        // Check if there are overlapping leaves (excluding this leave request)
+        $hasOverlap = LeaveRequest::where('employee_id', $employee->id)
+            ->where('id', '!=', $leave->id)
+            ->where('status', '!=', 'rejected')
+            ->where(function ($q) use ($request) {
+                $q->where('start_date', '<=', $request->end_date)
+                  ->where('end_date', '>=', $request->start_date);
+            })
+            ->exists();
+
+        if ($hasOverlap) {
+            return $this->error('You have already applied/taken leave on the selected date(s).', 422);
         }
 
         $leaveType = LeaveType::find($request->leave_type_id);

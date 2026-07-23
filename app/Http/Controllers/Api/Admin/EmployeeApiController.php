@@ -117,8 +117,10 @@ class EmployeeApiController extends ApiController
         // Update User part if User exists
         if ($employee->user) {
             $userData = [];
-            if (isset($data['company_email']))
+            if (isset($data['company_email'])) {
                 $userData['email'] = $userEmail;
+                $userData['username'] = $userEmail;
+            }
             if (!empty($data['password']))
                 $userData['password'] = Hash::make($data['password']);
             if (array_key_exists('organization_id', $data))
@@ -140,7 +142,7 @@ class EmployeeApiController extends ApiController
 
             // Update role if provided
             if (isset($data['role_id'])) {
-                $role = \App\Models\Role::where('id', $data['role_id'])->first();
+                $role = Role::where('id', $data['role_id'])->first();
                 if ($role) {
                     $employee->user->update(['role_id' => $role->id]);
                 }

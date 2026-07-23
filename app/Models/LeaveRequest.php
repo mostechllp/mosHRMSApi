@@ -43,4 +43,18 @@ class LeaveRequest extends Model
     {
         return $this->belongsTo(User::class, 'approved_by');
     }
+
+    public function attributesToArray()
+    {
+        $attributes = parent::attributesToArray();
+
+        if (isset($attributes['start_date']) && $this->start_date) {
+            $attributes['start_date'] = $this->start_date->format('Y-m-d');
+        }
+        if (isset($attributes['end_date']) && $this->end_date) {
+            $attributes['end_date'] = $this->end_date->format('Y-m-d');
+        }
+
+        return $attributes;
+    }
 }
