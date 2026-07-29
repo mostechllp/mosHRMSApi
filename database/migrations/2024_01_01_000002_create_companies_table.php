@@ -19,6 +19,8 @@ return new class extends Migration
             $table->string('logo')->nullable();
             $table->text('address')->nullable();
             $table->enum('trade_license', ['freezone', 'mainland'])->nullable();
+            $table->date('trade_license_expiry')->nullable();
+            $table->date('establishment_card_expiry')->nullable();
             $table->integer('created_by')->nullable();
             $table->integer('deleted_by')->nullable();
             $table->timestamps();

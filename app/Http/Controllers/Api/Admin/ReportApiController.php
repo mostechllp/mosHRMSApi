@@ -7,6 +7,7 @@ use App\Exports\AttendanceExport;
 use App\Exports\LeaveExport;
 use App\Exports\EmployeeExport;
 use App\Exports\TaskReportExport;
+use App\Exports\GenericExport;
 use App\Models\AttendanceLog;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
@@ -52,7 +53,7 @@ class ReportApiController extends ApiController
         ])
             ->whereHas('user', function ($query) {
                 $query->where('status', 'active')
-                    ->where('type', 'employee');
+                    ->where('type', '!=', 'admin');
             });
 
         // Filter by employee ID
@@ -149,11 +150,9 @@ class ReportApiController extends ApiController
                     if ($workedHours >= 8) {
 
                         $status = 'Full Day';
-
                     } elseif ($workedHours >= 4) {
 
                         $status = 'Half Day';
-
                     } else {
 
                         $status = 'Absent';
@@ -225,9 +224,10 @@ class ReportApiController extends ApiController
         $dateRange = $request->get('date_range', 'this_month');
         $employeeId = $request->get('employee_id');
         $departmentId = $request->get('department_id');
+        $status = $request->get('status');
         $perPage = $request->get('per_page', 50);
 
-        list($startDate, $endDate) = $this->getDateRange($dateRange, $request->get('from_date'), $request->get('to_date'));
+        [$startDate, $endDate] = $this->getDateRange($dateRange, $request->get('start_date'), $request->get('end_date'));
 
         $query = LeaveRequest::with(['employee.user.department', 'leaveType'])
             ->where(function ($q) use ($startDate, $endDate) {
@@ -237,7 +237,7 @@ class ReportApiController extends ApiController
 
         if ($employeeId && $employeeId !== 'all') {
             $query->whereHas('employee', function ($q) use ($employeeId) {
-                $q->where('employee_id', $employeeId);
+                $q->where('id', $employeeId);
             });
         }
 
@@ -245,6 +245,10 @@ class ReportApiController extends ApiController
             $query->whereHas('employee.user', function ($q) use ($departmentId) {
                 $q->where('department_id', $departmentId);
             });
+        }
+
+        if ($status) {
+            $query->where('status', $status);
         }
 
         $leaves = $query->latest()->paginate($perPage);
@@ -285,7 +289,32 @@ class ReportApiController extends ApiController
      */
     public function employeeDetails(): JsonResponse
     {
-        $employees = Employee::with(['user.company', 'user.department', 'user.designation'])->get();
+        $employees = Employee::select(
+            'id',
+            'employee_id',
+            'first_name',
+            'last_name',
+            'user_id',
+            'joining_date',
+            'dob',
+            'aadhar_number',
+            'pan_number',
+            'company_email',
+            'personal_email',
+            'personal_number'
+        )
+            ->whereHas('user', function ($query) {
+                $query->where('status', 'active')
+                    ->where('type', '!=', 'admin');
+            })
+            ->with([
+                'user:id,company_id,department_id,designation_id,email,status,type',
+                'user.company:id,company_name',
+                'user.department:id,name',
+                'user.designation:id,name'
+            ])
+            ->get();
+
         return $this->success($employees);
     }
 
@@ -399,9 +428,14 @@ class ReportApiController extends ApiController
 
         return match ($reportType) {
             'attendance' => $this->attendanceExport($request),
-            'leave' => $this->leaveExport($request),
-            'employee' => $this->employeeExport($request),
+            'leaves' => $this->leaveExport($request),
+            'employee-details' => $this->employeeExport($request),
             'task_report' => $this->taskReportExport($request),
+            'company-expiry' => $this->companyNearestExpiryExport($request),
+            'company-upcoming-renewals' => $this->companyUpcomingRenewalsExport($request),
+            'employee-nearest-expiry' => $this->employeeNearestExpiryExport($request),
+            'employee-upcoming-renewals' => $this->employeeUpcomingRenewalsExport($request),
+            'pending-leaves' => $this->pendingLeavesReportExport($request),
             default => $this->error('Invalid report type', 400),
         };
     }
@@ -415,14 +449,14 @@ class ReportApiController extends ApiController
 
         list($startDate, $endDate) = $this->getDateRange($dateRange, $request->get('from_date'), $request->get('to_date'));
 
-        $empQuery = Employee::with(['user.department'])->whereRelation('user', 'status', 'active');
+        $empQuery = Employee::with(['user.department'])->whereRelation('user', 'status', 'active')->whereRelation('user', 'type', '!=', 'admin');
         if ($employeeId && $employeeId !== 'all')
-            $empQuery->where('employee_id', $employeeId);
+            $empQuery->where('id', $employeeId);
         if ($departmentId && $departmentId !== 'all')
             $empQuery->whereRelation('user', 'department_id', $departmentId);
 
         $employees = $empQuery->get();
-        $employeeIds = $employees->pluck('employee_id')->toArray();
+        $employeeIds = $employees->pluck('user_id')->toArray();
 
         $allLogs = AttendanceLog::whereBetween('log_date', [$startDate, $endDate])
             ->whereIn('userid', $employeeIds)
@@ -459,8 +493,9 @@ class ReportApiController extends ApiController
         $dateRange = $request->get('date_range', 'this_month');
         $employeeId = $request->get('employee_id');
         $departmentId = $request->get('department_id');
+        $status = $request->get('status');
 
-        list($startDate, $endDate) = $this->getDateRange($dateRange, $request->get('from_date'), $request->get('to_date'));
+        [$startDate, $endDate] = $this->getDateRange($dateRange, $request->get('start_date'), $request->get('end_date'));
 
         $query = LeaveRequest::with(['employee.user', 'leaveType'])
             ->where(function ($q) use ($startDate, $endDate) {
@@ -468,13 +503,23 @@ class ReportApiController extends ApiController
             });
 
         if ($employeeId && $employeeId !== 'all')
-            $query->whereHas('employee', fn($q) => $q->where('employee_id', $employeeId));
+            $query->whereHas('employee', fn($q) => $q->where('id', $employeeId));
         if ($departmentId && $departmentId !== 'all')
             $query->whereHas('employee.user', fn($q) => $q->where('department_id', $departmentId));
+        if ($status)
+            $query->where('status', $status);
 
         $data = [];
+        $sessionMap = [
+            'morning' => 'M',
+            'afternoon' => 'A',
+        ];
+
         foreach ($query->get() as $leave) {
-            $data[] = [$leave->employee->employee_id ?? 'N/A', ($leave->employee->first_name ?? '') . ' ' . ($leave->employee->last_name ?? ''), $leave->leaveType->name ?? 'N/A', $leave->start_date->toDateString(), $leave->end_date->toDateString(), $leave->duration_days, ucfirst($leave->status), $leave->reason];
+            $session1 = $sessionMap[$leave->session1] ?? 'N/A';
+            $session2 = $sessionMap[$leave->session2] ?? 'N/A';
+
+            $data[] = [$leave->employee->employee_id ?? 'N/A', ($leave->employee->first_name ?? '') . ' ' . ($leave->employee->last_name ?? ''), $leave->leaveType->name ?? 'N/A', $leave->start_date->toDateString(), $leave->end_date->toDateString(), $leave->duration_days, $session1.' - '.$session2, ucfirst($leave->status), $leave->reason];
         }
 
         return $this->downloadResponse(new LeaveExport($data), "leave_report", $request->get('format'));
@@ -483,21 +528,49 @@ class ReportApiController extends ApiController
     public function employeeExport(Request $request)
     {
         $this->authenticateFromToken($request);
+
         $departmentId = $request->get('department_id');
         $companyId = $request->get('company_id');
 
-        $query = Employee::with(['user.company', 'user.department', 'user.designation'])->whereRelation('user', 'status', 'active');
-        if ($departmentId && $departmentId !== 'all')
-            $query->whereRelation('user', 'department_id', $departmentId);
-        if ($companyId && $companyId !== 'all')
-            $query->whereHas('user', fn($q) => $q->where('company_id', $companyId));
+        $query = Employee::with(['user.company', 'user.department', 'user.designation'])
+            ->whereHas('user', function ($q) {
+                $q->where('status', 'active')
+                    ->where('type', '!=', 'admin');
+            });
 
-        $data = [];
-        foreach ($query->get() as $emp) {
-            $data[] = [$emp->employee_id, $emp->first_name . ' ' . $emp->last_name, $emp->user->company->name ?? 'N/A', $emp->user->department->name ?? 'N/A', $emp->user->designation->name ?? 'N/A', $emp->joining_date, ucfirst($emp->user->status)];
+        if ($departmentId && $departmentId !== 'all') {
+            $query->whereRelation('user', 'department_id', $departmentId);
         }
 
-        return $this->downloadResponse(new EmployeeExport($data), "employee_report", $request->get('format'));
+        if ($companyId && $companyId !== 'all') {
+            $query->whereRelation('user', 'company_id', $companyId);
+        }
+
+        $data = [];
+
+        foreach ($query->get() as $emp) {
+            $data[] = [
+                $emp->employee_id,
+                $emp->first_name . ' ' . $emp->last_name,
+                $emp->user->company->company_name ?? 'N/A',
+                $emp->user->department->name ?? 'N/A',
+                $emp->user->designation->name ?? 'N/A',
+                $emp->joining_date,
+                $emp->dob,
+                $emp->company_email,
+                $emp->personal_email,
+                $emp->personal_number,
+                $emp->aadhar_number,
+                $emp->pan_number,
+                ucfirst($emp->user->status),
+            ];
+        }
+
+        return $this->downloadResponse(
+            new EmployeeExport($data),
+            "employee_report",
+            $request->get('format')
+        );
     }
 
     /**
@@ -656,8 +729,8 @@ class ReportApiController extends ApiController
                 $report->date ? Carbon::parse($report->date)->format('d/m/Y') : 'N/A',
                 $employee->employee_id ?? 'N/A',
                 $employee
-                ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
-                : ($report->user->username ?? 'N/A'),
+                    ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
+                    : ($report->user->username ?? 'N/A'),
                 $report->tasks_completed ?? '',
                 $report->pending_tasks ?? '',
                 $report->plan_tomorrow ?? '',
@@ -678,6 +751,210 @@ class ReportApiController extends ApiController
             default => Excel::download($exportObj, $filename . '.csv', \Maatwebsite\Excel\Excel::CSV),
         };
     }
+
+    public function pendingLeavesReportExport(Request $request)
+    {
+        $this->authenticateFromToken($request);
+        $dateRange = $request->get('date_range', 'this_month');
+        $employeeId = $request->get('employee_id');
+        $departmentId = $request->get('department_id');
+
+        [$startDate, $endDate] = $this->getDateRange($dateRange, $request->get('start_date'), $request->get('end_date'));
+
+        $query = LeaveRequest::with(['employee.user', 'leaveType'])
+            ->where(function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('start_date', [$startDate, $endDate])->orWhereBetween('end_date', [$startDate, $endDate]);
+            });
+
+        if ($employeeId && $employeeId !== 'all')
+            $query->whereHas('employee', fn($q) => $q->where('id', $employeeId));
+        if ($departmentId && $departmentId !== 'all')
+            $query->whereHas('employee.user', fn($q) => $q->where('department_id', $departmentId));
+
+        $query->where('status', 'pending');
+
+        $data = [];
+        $sessionMap = [
+            'morning' => 'M',
+            'afternoon' => 'A',
+        ];
+
+        foreach ($query->get() as $leave) {
+            $session1 = $sessionMap[$leave->session1] ?? 'N/A';
+            $session2 = $sessionMap[$leave->session2] ?? 'N/A';
+            $data[] = [$leave->employee->employee_id ?? 'N/A', ($leave->employee->first_name ?? '') . ' ' . ($leave->employee->last_name ?? ''), $leave->leaveType->name ?? 'N/A', $leave->start_date->toDateString(), $leave->end_date->toDateString(), $leave->duration_days, $session1.' - '.$session2, ucfirst($leave->status), $leave->reason];
+        }
+
+        return $this->downloadResponse(new LeaveExport($data), "pending_leave_request_report", $request->get('format'));
+    }
+
+    public function companyNearestExpiryExport(Request $request)
+    {
+        $this->authenticateFromToken($request);
+        $threshold = Carbon::now()->addDays(30);
+        $companies = Company::where(function ($query) use ($threshold) {
+            $query->whereDate('trade_license_expiry', '<=', $threshold)
+                ->orWhereDate('establishment_card_expiry', '<=', $threshold);
+        })->get();
+
+        $headings = [
+            'Company Name',
+            'Trade License Number',
+            'Trade License Expiry',
+            'Establishment Card Number',
+            'Establishment Card Expiry',
+        ];
+
+        $data = [];
+        foreach ($companies as $company) {
+            $data[] = [
+                $company->company_name ?? 'N/A',
+                $company->trade_license_number ?? 'N/A',
+                $company->trade_license_expiry ?? 'N/A',
+                $company->establishment_card_number ?? 'N/A',
+                $company->establishment_card_expiry ?? 'N/A',
+            ];
+        }
+
+        return $this->downloadResponse(
+            new GenericExport($data, $headings),
+            "company_nearest_expiry_report",
+            $request->get('format')
+        );
+    }
+
+    public function companyUpcomingRenewalsExport(Request $request)
+    {
+        $this->authenticateFromToken($request);
+        $start = Carbon::now()->addDays(31);
+        $end = Carbon::now()->addDays(90);
+
+        $companies = Company::where(function ($query) use ($start, $end) {
+            $query->whereBetween('trade_license_expiry', [$start, $end])
+                ->orWhereBetween('establishment_card_expiry', [$start, $end]);
+        })->get();
+
+        $headings = [
+            'Company Name',
+            'Trade License Number',
+            'Trade License Expiry',
+            'Establishment Card Number',
+            'Establishment Card Expiry',
+        ];
+
+        $data = [];
+        foreach ($companies as $company) {
+            $data[] = [
+                $company->company_name ?? 'N/A',
+                $company->trade_license_number ?? 'N/A',
+                $company->trade_license_expiry ?? 'N/A',
+                $company->establishment_card_number ?? 'N/A',
+                $company->establishment_card_expiry ?? 'N/A',
+            ];
+        }
+
+        return $this->downloadResponse(
+            new GenericExport($data, $headings),
+            "company_upcoming_renewals_report",
+            $request->get('format')
+        );
+    }
+
+    public function employeeNearestExpiryExport(Request $request)
+    {
+        $this->authenticateFromToken($request);
+        $threshold = Carbon::now()->addDays(30);
+        $employees = Employee::with(['user.company', 'user.department', 'user.designation'])
+            ->where(function ($query) use ($threshold) {
+                $query->whereDate('passport_expiry_date', '<=', $threshold)
+                    ->orWhereDate('visa_expiry_date', '<=', $threshold)
+                    ->orWhereDate('labor_expiry_date', '<=', $threshold)
+                    ->orWhereDate('eid_expiry_date', '<=', $threshold);
+            })->get();
+
+        $headings = [
+            'Employee ID',
+            'Name',
+            'Company',
+            'Department',
+            'Designation',
+            'Passport Expiry',
+            'Visa Expiry',
+            'Labor Card Expiry',
+            'EID Expiry',
+        ];
+
+        $data = [];
+        foreach ($employees as $emp) {
+            $data[] = [
+                $emp->employee_id,
+                $emp->first_name . ' ' . $emp->last_name,
+                $emp->user->company->company_name ?? 'N/A',
+                $emp->user->department->name ?? 'N/A',
+                $emp->user->designation->name ?? 'N/A',
+                $emp->passport_expiry_date ?? 'N/A',
+                $emp->visa_expiry_date ?? 'N/A',
+                $emp->labor_expiry_date ?? 'N/A',
+                $emp->eid_expiry_date ?? 'N/A',
+            ];
+        }
+
+        return $this->downloadResponse(
+            new GenericExport($data, $headings),
+            "employee_nearest_expiry_report",
+            $request->get('format')
+        );
+    }
+
+    public function employeeUpcomingRenewalsExport(Request $request)
+    {
+        $this->authenticateFromToken($request);
+        $start = Carbon::now()->addDays(31);
+        $end = Carbon::now()->addDays(90);
+
+        $employees = Employee::with(['user.company', 'user.department', 'user.designation'])
+            ->where(function ($query) use ($start, $end) {
+                $query->whereBetween('passport_expiry_date', [$start, $end])
+                    ->orWhereBetween('visa_expiry_date', [$start, $end])
+                    ->orWhereBetween('labor_expiry_date', [$start, $end])
+                    ->orWhereBetween('eid_expiry_date', [$start, $end]);
+            })->get();
+
+        $headings = [
+            'Employee ID',
+            'Name',
+            'Company',
+            'Department',
+            'Designation',
+            'Passport Expiry',
+            'Visa Expiry',
+            'Labor Card Expiry',
+            'EID Expiry',
+        ];
+
+        $data = [];
+        foreach ($employees as $emp) {
+            $data[] = [
+                $emp->employee_id,
+                $emp->first_name . ' ' . $emp->last_name,
+                $emp->user->company->company_name ?? 'N/A',
+                $emp->user->department->name ?? 'N/A',
+                $emp->user->designation->name ?? 'N/A',
+                $emp->passport_expiry_date ?? 'N/A',
+                $emp->visa_expiry_date ?? 'N/A',
+                $emp->labor_expiry_date ?? 'N/A',
+                $emp->eid_expiry_date ?? 'N/A',
+            ];
+        }
+
+        return $this->downloadResponse(
+            new GenericExport($data, $headings),
+            "employee_upcoming_renewals_report",
+            $request->get('format')
+        );
+    }
+
+
 
     /**
      * Helper: Handle authentication via query token for downloads
@@ -722,7 +999,7 @@ class ReportApiController extends ApiController
                 'data' => $data,
                 'headings' => $headings,
                 'title' => $title
-            ]);
+            ])->setPaper('a4', 'landscape');
 
             return $pdf->download($filename . '.pdf');
         }
