@@ -34,7 +34,9 @@ class CompanyApiController extends ApiController
             'email' => 'nullable|email|max:255',
             'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
             'address' => 'nullable|string',
-            'trade_license' => 'nullable|in:freezone,mainland'
+            'trade_license' => 'nullable|in:freezone,mainland',
+            'trade_license_expiry'=> 'nullable|date',
+            'establishment_card_expiry'=> 'nullable|date'
         ]);
 
         $data = $request->except('logo');
@@ -64,7 +66,9 @@ class CompanyApiController extends ApiController
             'email' => 'nullable|email|max:255',
             'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
             'address' => 'nullable|string',
-            'trade_license' => 'nullable|in:freezone,mainland'
+            'trade_license' => 'nullable|in:freezone,mainland',
+            'trade_license_expiry'=> 'nullable|date',
+            'establishment_card_expiry'=> 'nullable|date'
         ]);
 
         $data = $request->except('logo');

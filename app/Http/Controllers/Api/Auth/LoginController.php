@@ -73,6 +73,17 @@ class LoginController extends ApiController
             auth('api')->logout();
             return $this->error('Account is under onboarding and is not yet active.', 403);
         }
+        $agreedNow = $request->boolean('agreeToTerms');
+
+        if ($agreedNow) {
+            $user->agree_to_terms = true;
+            $user->save();
+        }
+
+        if (!$agreedNow && !$user->agree_to_terms) {
+            auth('api')->logout();
+            return $this->error('You must agree to the terms and conditions to login.', 403);
+        }
 
         return $this->respondWithToken($token, $user);
     }

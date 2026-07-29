@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Api\Employee;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Models\AttendanceLog;
+use App\Models\Task;
 use App\Models\TaskReport;
 use App\Models\WfhRequest;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\LeaveAllocation;
+use App\Models\Employee;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -117,7 +119,11 @@ class EmployeePortalApiController extends ApiController
             ->whereYear('start_date', date('Y'))
             ->sum('duration_days');
 
-        $leaveBalance = $employee->total_leaves_allocated - $totalLeavesTaken;
+        $totalAllocatedDays = LeaveAllocation::where('employee_id', $employee->id)
+            ->whereYear('year', date('Y'))
+            ->sum('allocated_days');
+
+        $leaveBalance = $totalAllocatedDays - $totalLeavesTaken;
 
         // Punch Access Logic
         $canPunch = true;
@@ -139,6 +145,61 @@ class EmployeePortalApiController extends ApiController
                 ->where('status', 'Approved')
                 ->exists();
         }
+
+        // ── Task sections ──────────────────────────────────────────────
+        $employeeId = $user->employee->id;
+
+        // Base query: all tasks assigned to this employee (with pivot status)
+        $baseTaskQuery = Task::with([
+            'project:id,project_name',
+            'assignedTo' => function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId)
+                    ->select('employees.id')
+                    ->withPivot('status');
+            }
+        ])
+            ->whereHas('assignedTo', function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId);
+            });
+
+        // Today's assigned tasks (assigned_date = today)
+        $todayAssignedTasks = (clone $baseTaskQuery)
+            ->whereDate('assigned_date', $today)
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
+
+        // All tasks
+        $allTasks = (clone $baseTaskQuery)
+            ->latest()
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
+
+        // Tasks in progress
+        $tasksInProgress = (clone $baseTaskQuery)
+            ->whereHas('assignedTo', function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId)
+                    ->where('task_employee.status', 'in_progress');
+            })
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
+
+        // Tasks completed
+        $tasksCompleted = (clone $baseTaskQuery)
+            ->whereHas('assignedTo', function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId)
+                    ->where('task_employee.status', 'completed');
+            })
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
+
+        // Tasks on hold
+        $tasksOnHold = (clone $baseTaskQuery)
+            ->whereHas('assignedTo', function ($q) use ($employeeId) {
+                $q->where('employees.id', $employeeId)
+                    ->where('task_employee.status', 'on_hold');
+            })
+            ->get()
+            ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
 
         return $this->success([
             'employee' => $user->employee,
@@ -162,13 +223,45 @@ class EmployeePortalApiController extends ApiController
             'leave_stats' => [
                 'total_taken' => (float) $totalLeavesTaken,
                 'balance' => (float) $leaveBalance,
-                'allocated' => (float) $employee->total_leaves_allocated,
+                'allocated' => (float) $totalAllocatedDays,
             ],
             'attendance_history' => $attendanceHistory,
             'can_punch' => $canPunch,
             'pending_wfh_count' => WfhRequest::where('employee_id', $user->employee->id)->where('status', 'pending')->count(),
             'recent_leaves' => LeaveRequest::where('employee_id', $user->employee->id)->latest()->take(5)->get(),
+            'tasks' => [
+                'today_assigned_tasks' => $todayAssignedTasks,
+                'all_tasks' => $allTasks,
+                'in_progress' => $tasksInProgress,
+                'completed' => $tasksCompleted,
+                'on_hold' => $tasksOnHold,
+            ],
         ]);
+    }
+
+    /**
+     * Format a Task for the employee's dashboard view.
+     * Extracts the current employee's pivot status from the assignedTo collection.
+     */
+    private function formatTaskForEmployee(Task $task, int $employeeId): array
+    {
+        // The pivot for this employee (loaded via assignedTo relationship)
+        $pivot = $task->assignedTo->firstWhere('id', $employeeId)?->pivot;
+
+        return [
+            'id' => $task->id,
+            'title' => $task->title,
+            'task_description' => $task->task_description,
+            'project' => $task->project ? [
+                'id' => $task->project->id,
+                'project_name' => $task->project->project_name,
+            ] : null,
+            'assigned_by' => $task->assigned_by,
+            'assigned_date' => $task->assigned_date,
+            'due_date' => $task->due_date,
+            'priority' => $task->priority,
+            'status' => $pivot?->status ?? 'assigned',
+        ];
     }
 
 
@@ -267,7 +360,9 @@ class EmployeePortalApiController extends ApiController
 
         //calculation of working hours
         $punchIn = Carbon::parse($log->punch_in);
-        $workingMinutes = $punchIn->diffInMinutes($punchOutTime);
+        $totalMinutes = $punchIn->diffInMinutes($punchOutTime);
+        $breakMinutes = (int) $log->breaks()->sum('duration_minutes');
+        $workingMinutes = max(0, $totalMinutes - $breakMinutes);
 
         // Validate punch out date matches attendance date
         if ($punchOutTime->toDateString() !== $attendanceDate) {
@@ -380,7 +475,8 @@ class EmployeePortalApiController extends ApiController
 
         $timezone = $request->input('timezone', config('app.timezone'));
         $now = Carbon::now($timezone);
-        $duration = $activeBreak->start_time->diffInMinutes($now);
+        $durationInSeconds = $activeBreak->start_time->diffInSeconds($now);
+        $duration = (int) ceil($durationInSeconds / 60);
 
         $activeBreak->update([
             'end_time' => $now,
@@ -389,6 +485,51 @@ class EmployeePortalApiController extends ApiController
 
         return $this->success($activeBreak, 'Break ended successfully.');
     }
+
+    /**
+     * Get Breaks by date
+     */
+    public function getBreaks(Request $request): JsonResponse
+    {
+        $user = auth('api')->user();
+
+        if (!$user || !$user->employee) {
+            return $this->error('Employee profile not found', 404);
+        }
+
+        $attendanceLogs = AttendanceLog::with('breaks')
+            ->where('userid', $user->id)
+            ->orderBy('log_date', 'desc')
+            ->get();
+
+        if ($attendanceLogs->isEmpty()) {
+            return $this->success([
+                'breaks' => [],
+                'total_break_minutes' => 0,
+            ], 'No attendance logs found.');
+        }
+
+        $breaks = $attendanceLogs->flatMap(function ($log) {
+            return $log->breaks->map(function ($break) use ($log) {
+                return [
+                    'id' => $break->id,
+                    'attendance_log_id' => $log->id,
+                    'date' => $log->log_date,
+                    'start_time' => $break->start_time,
+                    'end_time' => $break->end_time,
+                    'duration_minutes' => $break->duration_minutes,
+                    'created_at' => $break->created_at,
+                    'updated_at' => $break->updated_at,
+                ];
+            });
+        })->values();
+
+        return $this->success([
+            'breaks' => $breaks,
+            'total_break_minutes' => $breaks->sum('duration_minutes'),
+        ]);
+    }
+
 
     /**
      * Leaves
@@ -404,6 +545,21 @@ class EmployeePortalApiController extends ApiController
         return $this->success([
             'leaves' => $leaves
         ]);
+    }
+
+    public function showLeave($id): JsonResponse
+    {
+        $user = auth('api')->user();
+        $employee = $user ? $user->employee : null;
+        if (!$employee)
+            return $this->error('Employee profile not found', 404);
+
+        $leave = LeaveRequest::with(['leaveType'])->where('employee_id', $employee->id)->find($id);
+
+        if (!$leave)
+            return $this->error('Leave request not found', 404);
+
+        return $this->success($leave);
     }
 
     public function leaveTypesAndBalance(): JsonResponse
@@ -468,17 +624,38 @@ class EmployeePortalApiController extends ApiController
     {
         $request->validate([
             'leave_type_id' => 'required|exists:leave_types,id',
-            'start_date' => 'required|date|after_or_equal:today',
+            'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
             'reason' => 'required|string|min:10',
             'claim_salary' => 'nullable|boolean',
             'document' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:2048',
+            'session1' => 'nullable|in:morning,afternoon',
+            'session2' => 'nullable|in:morning,afternoon',
+            'employee_id' => 'nullable',
         ]);
 
-        $user = auth('api')->user();
-        $employee = $user ? $user->employee : null;
+        if ($request->filled('employee_id')) {
+            $employee = Employee::find($request->employee_id);
+        } else {
+            $user = auth('api')->user();
+            $employee = $user ? $user->employee : null;
+        }
+
         if (!$employee)
             return $this->error('Employee profile not found', 404);
+
+        // Check if there are overlapping leaves
+        $hasOverlap = LeaveRequest::where('employee_id', $employee->id)
+            ->where('status', '!=', 'rejected')
+            ->where(function ($q) use ($request) {
+                $q->where('start_date', '<=', $request->end_date)
+                    ->where('end_date', '>=', $request->start_date);
+            })
+            ->exists();
+
+        if ($hasOverlap) {
+            return $this->error('You have already applied/taken leave on the selected date(s).', 422);
+        }
 
         $leaveType = LeaveType::find($request->leave_type_id);
 
@@ -487,10 +664,36 @@ class EmployeePortalApiController extends ApiController
             return $this->error('Medical certificate is required for sick leave', 422);
         }
 
-        // Duration calculation
         $start = Carbon::parse($request->start_date);
         $end = Carbon::parse($request->end_date);
-        $durationDays = $start->diffInDays($end) + 1;
+        $session1 = $request->session1;
+        $session2 = $request->session2;
+
+        $durationDays = 0.0;
+        $currentDate = $start->copy();
+
+        while ($currentDate->lte($end)) {
+            if ($currentDate->isSunday()) {
+                $currentDate->addDay();
+                continue;
+            }
+
+            if ($currentDate->isSameDay($start) && $currentDate->isSameDay($end)) {
+                if ($session1 === 'morning' && $session2 === 'afternoon') {
+                    $durationDays += 1.0;
+                } else {
+                    $durationDays += 0.5;
+                }
+            } elseif ($currentDate->isSameDay($start)) {
+                $durationDays += ($session1 === 'morning') ? 1.0 : 0.5;
+            } elseif ($currentDate->isSameDay($end)) {
+                $durationDays += ($session2 === 'afternoon') ? 1.0 : 0.5;
+            } else {
+                $durationDays += 1.0;
+            }
+
+            $currentDate->addDay();
+        }
 
         // Balance check
         $currentYear = date('Y');
@@ -503,7 +706,7 @@ class EmployeePortalApiController extends ApiController
 
         $leavesTaken = LeaveRequest::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
-            ->whereIn('status', ['approved', 'pending'])
+            ->where('status', 'approved')
             ->whereYear('start_date', $currentYear)
             ->sum('duration_days');
 
@@ -523,6 +726,8 @@ class EmployeePortalApiController extends ApiController
             'leave_type_id' => $request->leave_type_id,
             'start_date' => $request->start_date,
             'end_date' => $request->end_date,
+            'session1' => $session1,
+            'session2' => $session2,
             'duration_days' => $durationDays,
             'claim_salary' => $request->claim_salary ?? false,
             'document' => $documentPath,
@@ -531,6 +736,153 @@ class EmployeePortalApiController extends ApiController
         ]);
 
         return $this->success($leave, 'Leave request submitted successfully', 201);
+    }
+
+    public function updateLeave(Request $request, $id): JsonResponse
+    {
+        $request->validate([
+            'leave_type_id' => 'required|exists:leave_types,id',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'reason' => 'required|string|min:10',
+            'claim_salary' => 'nullable|boolean',
+            'document' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:2048',
+            'session1' => 'nullable|in:morning,afternoon',
+            'session2' => 'nullable|in:morning,afternoon',
+            'employee_id' => 'nullable',
+        ]);
+
+        if ($request->filled('employee_id')) {
+            $employee = Employee::find($request->employee_id);
+        } else {
+            $user = auth('api')->user();
+            $employee = $user ? $user->employee : null;
+        }
+
+        if (!$employee)
+            return $this->error('Employee profile not found', 404);
+
+        $leave = LeaveRequest::where('employee_id', $employee->id)->find($id);
+
+        if (!$leave) {
+            return $this->error('Leave request not found', 404);
+        }
+
+        if ($leave->status !== 'pending') {
+            return $this->error('Only pending leave requests can be updated.', 400);
+        }
+
+        // Check if there are overlapping leaves (excluding this leave request)
+        $hasOverlap = LeaveRequest::where('employee_id', $employee->id)
+            ->where('id', '!=', $leave->id)
+            ->where('status', '!=', 'rejected')
+            ->where(function ($q) use ($request) {
+                $q->where('start_date', '<=', $request->end_date)
+                    ->where('end_date', '>=', $request->start_date);
+            })
+            ->exists();
+
+        if ($hasOverlap) {
+            return $this->error('You have already applied/taken leave on the selected date(s).', 422);
+        }
+
+        $leaveType = LeaveType::find($request->leave_type_id);
+
+        if (str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document') && !$leave->document) {
+            return $this->error('Medical certificate is required for sick leave', 422);
+        }
+
+        $start = Carbon::parse($request->start_date);
+        $end = Carbon::parse($request->end_date);
+        $session1 = $request->session1;
+        $session2 = $request->session2;
+
+        $durationDays = 0.0;
+        $currentDate = $start->copy();
+
+        while ($currentDate->lte($end)) {
+            if ($currentDate->isSunday()) {
+                $currentDate->addDay();
+                continue;
+            }
+
+            if ($currentDate->isSameDay($start) && $currentDate->isSameDay($end)) {
+                if ($session1 === 'morning' && $session2 === 'afternoon') {
+                    $durationDays += 1.0;
+                } else {
+                    $durationDays += 0.5;
+                }
+            } elseif ($currentDate->isSameDay($start)) {
+                $durationDays += ($session1 === 'morning') ? 1.0 : 0.5;
+            } elseif ($currentDate->isSameDay($end)) {
+                $durationDays += ($session2 === 'afternoon') ? 1.0 : 0.5;
+            } else {
+                $durationDays += 1.0;
+            }
+
+            $currentDate->addDay();
+        }
+
+        $currentYear = date('Y');
+        $allocation = LeaveAllocation::where('employee_id', $employee->id)
+            ->where('leave_type_id', $request->leave_type_id)
+            ->where('year', $currentYear)
+            ->first();
+
+        $allocated = $allocation ? (float) $allocation->allocated_days : 0;
+
+        $leavesTaken = LeaveRequest::where('employee_id', $employee->id)
+            ->where('leave_type_id', $request->leave_type_id)
+            ->where('status', 'approved')
+            ->whereYear('start_date', $currentYear)
+            ->sum('duration_days');
+
+        $remainingBalance = $allocated - $leavesTaken;
+
+        if ($durationDays > $remainingBalance) {
+            return $this->error("Insufficient leave balance. You have only $remainingBalance days remaining.", 422);
+        }
+
+        $documentPath = $leave->document;
+        if ($request->hasFile('document')) {
+            $documentPath = $request->file('document')->store('leaves/documents', 'public');
+        }
+
+        $leave->update([
+            'leave_type_id' => $request->leave_type_id,
+            'start_date' => $request->start_date,
+            'end_date' => $request->end_date,
+            'session1' => $session1,
+            'session2' => $session2,
+            'duration_days' => $durationDays,
+            'claim_salary' => $request->claim_salary ?? false,
+            'document' => $documentPath,
+            'reason' => $request->reason,
+        ]);
+
+        return $this->success($leave, 'Leave request updated successfully');
+    }
+
+    public function destroyLeave($id): JsonResponse
+    {
+        $user = auth('api')->user();
+        $employee = $user ? $user->employee : null;
+        if (!$employee)
+            return $this->error('Employee profile not found', 404);
+
+        $leave = LeaveRequest::where('employee_id', $employee->id)->find($id);
+
+        if (!$leave) {
+            return $this->error('Leave request not found', 404);
+        }
+
+        if ($leave->status !== 'pending') {
+            return $this->error('Only pending leave requests can be deleted.', 400);
+        }
+
+        $leave->delete();
+
+        return $this->success(null, 'Leave request deleted successfully');
     }
 
     /**

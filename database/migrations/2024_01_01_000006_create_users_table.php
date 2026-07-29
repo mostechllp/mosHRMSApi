@@ -21,6 +21,7 @@ return new class extends Migration
             $table->foreignId('designation_id')->nullable()->constrained('designations')->nullOnDelete();
             $table->enum('type', ['admin', 'employee'])->default('employee');
             $table->enum('status', ['active', 'inactive', 'onboarding'])->default('active');
+            $table->boolean('agree_to_terms')->default(false);
             $table->integer('created_by')->nullable();
             $table->integer('deleted_by')->nullable();
             $table->rememberToken();

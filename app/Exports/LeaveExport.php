@@ -25,7 +25,7 @@ class LeaveExport implements FromArray, WithHeadings, WithStyles, ShouldAutoSize
 
     public function headings(): array
     {
-        return ['Employee ID', 'Name', 'Leave Type', 'From', 'To', 'Days', 'Status', 'Reason'];
+        return ['Employee ID', 'Name', 'Leave Type', 'From', 'To', 'Session' ,'Days', 'Status', 'Reason'];
     }
 
     public function title(): string

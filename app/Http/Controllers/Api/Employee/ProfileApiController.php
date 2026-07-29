@@ -55,7 +55,6 @@ class ProfileApiController extends ApiController
         $request->validate([
             'username' => 'nullable|string|max:255|unique:users,username,' . $user->id,
             'email' => 'nullable|email|max:255|unique:users,email,' . $user->id,
-
             'first_name' => 'nullable|string|max:255',
             'last_name' => 'nullable|string|max:255',
             'personal_email' => 'nullable|email|max:255',
@@ -73,18 +72,34 @@ class ProfileApiController extends ApiController
         $employee = $user->employee;
 
         if ($employee) {
-            if(!$request->personal_email){
-                return $this->error('Personal email is required for employee', 422);
-            }
+            // if(!$request->personal_email){
+            //     return $this->error('Personal email is required for employee', 422);
+            // }
 
             // Update employee table
-            $employee->update([
-                'first_name' => $request->first_name,
-                'last_name' => $request->last_name,
-                'personal_email' => $request->personal_email,
-                'personal_number' => $request->personal_number,
-                'address' => $request->address,
-            ]);
+            $data = [];
+
+            if ($request->has('first_name')) {
+                $data['first_name'] = $request->first_name;
+            }
+
+            if ($request->has('last_name')) {
+                $data['last_name'] = $request->last_name;
+            }
+
+            if ($request->has('personal_email')) {
+                $data['personal_email'] = $request->personal_email;
+            }
+
+            if ($request->has('personal_number')) {
+                $data['personal_number'] = $request->personal_number;
+            }
+
+            if ($request->has('address')) {
+                $data['address'] = $request->address;
+            }
+
+            $employee->update($data);
 
 
 

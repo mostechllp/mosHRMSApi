@@ -19,7 +19,9 @@ class Company extends Model
         'email',
         'logo',
         'address',
-        'trade_license'
+        'trade_license',
+        'trade_license_expiry',
+        'establishment_card_expiry'
     ];
 
     protected $casts = [

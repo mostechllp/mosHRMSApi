@@ -13,7 +13,7 @@ class LeaveApiController extends ApiController
     {
         $status = $request->get('status');
         $employee_id = $request->get('employee_id');
-        $perPage = $request->get('per_page', 15);
+        $perPage = $request->get('per_page', 100);
 
         $query = LeaveRequest::with(['employee.user', 'leaveType', 'approver'])->latest();
 

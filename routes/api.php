@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\Admin\EmployeeApiController;
 use App\Http\Controllers\Api\Admin\OrganizationApiController;
 use App\Http\Controllers\Api\Admin\CompanyApiController;
 use App\Http\Controllers\Api\Admin\HRApiController;
+use App\Http\Controllers\Api\Admin\TaskApiController;
 use App\Http\Controllers\Api\Admin\DashboardApiController;
 use App\Http\Controllers\Api\Admin\PartyApiController;
 use App\Http\Controllers\Api\Admin\DocumentApiController;
@@ -22,6 +23,7 @@ use App\Http\Controllers\Api\Admin\TaskReportApiController as AdminTaskReportApi
 use App\Http\Controllers\Api\Admin\AttendanceRequestApiController as AdminAttendanceRequestApiController;
 use App\Http\Controllers\Api\Admin\LeaveAllocationApiController;
 use App\Http\Controllers\Api\Employee\EmployeePortalApiController;
+use App\Http\Controllers\Api\Employee\EmployeeTaskApiController;
 use App\Http\Controllers\Api\Employee\ProfileApiController;
 use App\Http\Controllers\Api\Employee\AttendanceRequestApiController as EmployeeAttendanceRequestApiController;
 use App\Http\Controllers\Api\Admin\FileApiController;
@@ -114,6 +116,9 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::post('attendance', [AttendanceApiController::class, 'store'])->middleware('permission:attendance.edit');
     Route::put('attendance/{id}', [AttendanceApiController::class, 'update'])->middleware('permission:attendance.edit');
     Route::delete('attendance/{id}', [AttendanceApiController::class, 'destroy'])->middleware('permission:attendance.delete');
+    Route::put('attendance/breaks/{id}', [AttendanceApiController::class, 'updateBreak'])->middleware('permission:attendance.edit');
+    Route::delete('attendance/breaks/{id}', [AttendanceApiController::class, 'destroyBreak'])->middleware('permission:attendance.delete');
+    Route::get('attendance/breaks/{id}', [AttendanceApiController::class, 'showBreak'])->middleware('permission:attendance.read');
     Route::post('attendance/upload', [AttendanceApiController::class, 'upload'])->middleware('permission:attendance.edit');
     Route::get('attendance/upload-status/{id}', [AttendanceApiController::class, 'uploadStatus'])->middleware('permission:attendance.read');
     Route::get('attendance/punch-in-today', [AttendanceApiController::class, 'punchInToday'])->middleware('permission:attendance.read');
@@ -144,6 +149,12 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::get('project-assignments', [ProjectAssignmentApiController::class, 'index']);
     Route::get('project-assignments/{id}', [ProjectAssignmentApiController::class, 'show']);
     Route::post('employees/projects', [ProjectAssignmentApiController::class, 'assign']);
+
+    // Tasks
+    Route::get('tasks/employees', [TaskApiController::class, 'listEmployees']);
+    Route::apiResource('tasks', TaskApiController::class);
+    Route::get('projects/{projectId}/tasks', [TaskApiController::class, 'tasksByProject']);
+    Route::patch('tasks/{taskId}/status', [EmployeeTaskApiController::class, 'updateStatus']);
 
     // HR Modules
     Route::get('designations', [HRApiController::class, 'indexDesignations']);
@@ -256,11 +267,17 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'employee'], function () {
     Route::post('punch-out', [EmployeePortalApiController::class, 'punchOut']);
     Route::post('break/start', [EmployeePortalApiController::class, 'startBreak']);
     Route::post('break/end', [EmployeePortalApiController::class, 'endBreak']);
+    Route::get('breaks', [EmployeePortalApiController::class, 'getBreaks']);
 
     // Leaves
     Route::get('leaves', [EmployeePortalApiController::class, 'leaves']);
+    Route::get('leaves/{leave}', [EmployeePortalApiController::class, 'showLeave']);
     Route::get('leave-balance', [EmployeePortalApiController::class, 'leaveTypesAndBalance']);
     Route::post('leaves', [EmployeePortalApiController::class, 'storeLeave']);
+    Route::put('leaves/{leave}', [EmployeePortalApiController::class, 'updateLeave']);
+    Route::delete('leaves/{leave}', [EmployeePortalApiController::class, 'destroyLeave']);
+    Route::get('leave-types', [LeaveTypeApiController::class, 'index']);
+    Route::get('leave-allocations/{employee}', [LeaveAllocationApiController::class, 'show']);
 
     // Task Reports
     Route::get('task-reports', [EmployeePortalApiController::class, 'taskReports']);
@@ -279,6 +296,13 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'employee'], function () {
     // Attendance Requests
     Route::get('attendance-requests', [EmployeeAttendanceRequestApiController::class, 'index']);
     Route::post('attendance-requests', [EmployeeAttendanceRequestApiController::class, 'store']);
+    Route::put('attendance-requests/{attendanceRequest}', [EmployeeAttendanceRequestApiController::class, 'update']);
+    Route::delete('attendance-requests/{attendanceRequest}', [EmployeeAttendanceRequestApiController::class, 'destroy']);
+
+    // Tasks (Employee side)
+    Route::get('tasks', [EmployeeTaskApiController::class, 'index']);
+    Route::get('tasks/{taskId}', [EmployeeTaskApiController::class, 'show']);
+    Route::patch('tasks/{taskId}/status', [EmployeeTaskApiController::class, 'updateStatus']);
 
     //Assets
     Route::get('assets/{id}', [AssetApiController::class, 'employeeAssets']);

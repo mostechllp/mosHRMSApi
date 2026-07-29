@@ -71,6 +71,10 @@ class Employee extends Model
         'eid_expiry_date',
         'eid_1st_page',
         'eid_2nd_page',
+        'aadhar_number',
+        'pan_number',
+        'aadhar_photo',
+        'pan_photo',
         'dependents',
         'educational_1st_page',
         'educational_2nd_page',
@@ -157,5 +161,12 @@ class Employee extends Model
     public function offboardings()
     {
         return $this->hasMany(Offboarding::class);
+    }
+
+    public function tasks()
+    {
+        return $this->belongsToMany(Task::class, 'task_employee')
+                    ->withPivot('status')
+                    ->withTimestamps();
     }
 }
