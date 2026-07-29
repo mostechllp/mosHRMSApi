@@ -8,21 +8,74 @@ use App\Models\LeaveType;
 use App\Models\LeaveAllocation;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use App\Models\LeaveRequest;
+use Illuminate\Support\Facades\DB;
 
 class LeaveAllocationApiController extends ApiController
 {
     /**
      * Display a listing of employee leave balances.
      */
+    // public function index(): JsonResponse
+    // {
+    //     $employees = Employee::with(['user.designation', 'user.department', 'user.company'])->get();
+    //     $leaveTypes = LeaveType::where('status', true)->get();
+
+    //     return $this->success([
+    //         'employees' => $employees,
+    //         'leave_types' => $leaveTypes
+    //     ]);
+    // }
+
     public function index(): JsonResponse
     {
-        $employees = Employee::with(['user.designation', 'user.department', 'user.company'])->get();
+        $employees = Employee::with('user')
+            ->whereHas('user', function ($query) {
+                $query->where('type', '!=', 'admin');
+            })
+            ->get();
+
         $leaveTypes = LeaveType::where('status', true)->get();
 
-        return $this->success([
-            'employees' => $employees,
-            'leave_types' => $leaveTypes
-        ]);
+        $usedLeaves = LeaveRequest::whereIn('employee_id', $employees->pluck('id'))
+            ->where('status', 'approved')
+            ->select('employee_id', 'leave_type_id', DB::raw('SUM(duration_days) as used_days'))
+            ->groupBy('employee_id', 'leave_type_id')
+            ->get()
+            ->groupBy('employee_id');
+
+        $allocatedLeaves = LeaveAllocation::whereIn('employee_id', $employees->pluck('id'))
+            ->select('employee_id', 'leave_type_id', DB::raw('SUM(allocated_days) as allocated_days'))
+            ->groupBy('employee_id', 'leave_type_id')
+            ->get()
+            ->groupBy('employee_id');
+
+        $result = $employees->map(function ($employee) use ($leaveTypes, $usedLeaves, $allocatedLeaves) {
+            $employeeUsed = $usedLeaves->get($employee->id, collect());
+            $employeeAllocated = $allocatedLeaves->get($employee->id, collect());
+
+            return [
+                'employee_name' => $employee->first_name . ' ' . $employee->last_name ?? null,
+                'leave_types' => $leaveTypes->map(function ($leaveType) use ($employeeUsed, $employeeAllocated) {
+                    $used = (float) (optional(
+                        $employeeUsed->firstWhere('leave_type_id', $leaveType->id)
+                    )->used_days ?? 0);
+
+                    $allocated = (float) (optional(
+                        $employeeAllocated->firstWhere('leave_type_id', $leaveType->id)
+                    )->allocated_days ?? 0);
+
+                    return [
+                        'leave_type' => $leaveType->name,
+                        'allocated'  => $allocated,
+                        'used'       => $used,
+                        'balance'    => $allocated - $used,
+                    ];
+                })->values(),
+            ];
+        });
+
+        return $this->success($result);
     }
 
     /**

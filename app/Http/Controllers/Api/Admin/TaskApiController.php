@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Task;
+use App\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
@@ -23,6 +24,12 @@ class TaskApiController extends ApiController
         if ($request->filled('department_id')) {
             $query->whereHas('project', function ($q) use ($request) {
                 $q->where('department_id', $request->department_id);
+            });
+        }
+
+        if ($request->filled('status')) {
+            $query->whereHas('assignedTo', function ($q) use ($request) {
+                $q->where('task_employee.status', $request->status);
             });
         }
 
@@ -47,9 +54,6 @@ class TaskApiController extends ApiController
         ]);
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -62,13 +66,19 @@ class TaskApiController extends ApiController
             'priority' => 'nullable|in:low,medium,high',
             'assigned_to' => 'required|array',
             'assigned_to.*' => 'exists:employees,id',
-            'status' => 'required|in:assigned,in_progress,completed,on_hold'
+            'status' => 'nullable|in:assigned,in_progress,completed,on_hold',
         ]);
 
-        $task = Task::create($validated);
+        $taskData = collect($validated)->except(['status', 'assigned_to'])->toArray();
+        $task = Task::create($taskData);
 
         if ($request->has('assigned_to')) {
-            $task->assignedTo()->attach($request->assigned_to);
+            $status = $request->input('status', 'assigned');
+            $attachData = [];
+            foreach ($request->assigned_to as $employeeId) {
+                $attachData[$employeeId] = ['status' => $status];
+            }
+            $task->assignedTo()->attach($attachData);
         }
 
         return $this->success($task->load(['assignedTo', 'project.department']), 'Task created successfully', 201);
@@ -97,18 +107,44 @@ class TaskApiController extends ApiController
             'priority' => 'nullable|in:low,medium,high',
             'assigned_to' => 'nullable|array',
             'assigned_to.*' => 'exists:employees,id',
-            'status' => 'required|in:assigned,in_progress,completed,on_hold'
+            'status' => 'nullable|in:assigned,in_progress,completed,on_hold',
         ]);
 
-        $task->update($validated);
+        $taskData = collect($validated)->except(['status', 'assigned_to'])->toArray();
+        $task->update($taskData);
 
-        if ($request->has('assigned_to')) {
-            $task->assignedTo()->sync($request->assigned_to);
-        }
+        // if ($request->has('assigned_to')) {
+        //     $status = $request->input('status');
+        //     $syncData = [];
+        //     foreach ($request->assigned_to as $employeeId) {
+        //         $syncData[$employeeId] = ['status' => $status];
+        //     }
+        //     $task->assignedTo()->sync($syncData);
+        // }
 
         return $this->success($task->load(['assignedTo', 'project.department']), 'Task updated successfully');
     }
 
+    public function listEmployees()
+    {
+        $employees = Employee::with('user.designation', 'user.department')
+            ->whereHas('user', function ($q) {
+                $q->where('status', 'active')
+                    ->where('type', '!=', 'admin');
+            })
+            ->select('id', 'user_id', 'first_name', 'last_name')
+            ->get()
+            ->map(function ($employee) {
+                return [
+                    'id' => $employee->id,
+                    'name' => trim($employee->first_name . ' ' . $employee->last_name),
+                    'designation' => optional($employee->user->designation)->name,
+                    'department' => $employee->user->department
+                ];
+            });
+
+        return response()->json($employees);
+    }
     /**
      * Remove the specified resource from storage.
      */

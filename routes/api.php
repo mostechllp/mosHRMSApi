@@ -151,6 +151,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::post('employees/projects', [ProjectAssignmentApiController::class, 'assign']);
 
     // Tasks
+    Route::get('tasks/employees', [TaskApiController::class, 'listEmployees']);
     Route::apiResource('tasks', TaskApiController::class);
     Route::get('projects/{projectId}/tasks', [TaskApiController::class, 'tasksByProject']);
     Route::patch('tasks/{taskId}/status', [EmployeeTaskApiController::class, 'updateStatus']);

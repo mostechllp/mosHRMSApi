@@ -225,7 +225,7 @@ class ReportApiController extends ApiController
         $dateRange = $request->get('date_range', 'this_month');
         $employeeId = $request->get('employee_id');
         $departmentId = $request->get('department_id');
-        $perPage = $request->get('per_page', 10);
+        $perPage = $request->get('per_page', 50);
 
         list($startDate, $endDate) = $this->getDateRange($dateRange, $request->get('from_date'), $request->get('to_date'));
 
@@ -579,11 +579,11 @@ class ReportApiController extends ApiController
     public function taskReportExport(Request $request)
     {
         $this->authenticateFromToken($request);
-        $format    = strtolower($request->get('format', 'csv'));
+        $format = strtolower($request->get('format', 'csv'));
         $dateRange = $request->get('date_range', 'today');
-        $fromDate  = $request->get('from_date');
-        $toDate    = $request->get('to_date');
-        $search    = $request->get('search');
+        $fromDate = $request->get('from_date');
+        $toDate = $request->get('to_date');
+        $search = $request->get('search');
 
         $taskQuery = TaskReport::with(['user.employee']);
 
@@ -624,23 +624,23 @@ class ReportApiController extends ApiController
             $rows = $records->map(function ($report) {
                 $employee = $report->user->employee ?? null;
                 return [
-                    'date'            => $report->date ? Carbon::parse($report->date)->format('d/m/Y') : '-',
-                    'employee_name'   => $employee
+                    'date' => $report->date ? Carbon::parse($report->date)->format('d/m/Y') : '-',
+                    'employee_name' => $employee
                         ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
                         : ($report->user->username ?? 'N/A'),
                     'tasks_completed' => str_replace("\t", "    ", $report->tasks_completed ?? ''),
-                    'pending_tasks'   => str_replace("\t", "    ", $report->pending_tasks ?? ''),
-                    'plan_tomorrow'   => str_replace("\t", "    ", $report->plan_tomorrow ?? ''),
-                    'remarks'         => str_replace("\t", "    ", $report->remarks ?? ''),
+                    'pending_tasks' => str_replace("\t", "    ", $report->pending_tasks ?? ''),
+                    'plan_tomorrow' => str_replace("\t", "    ", $report->plan_tomorrow ?? ''),
+                    'remarks' => str_replace("\t", "    ", $report->remarks ?? ''),
                 ];
             })->values()->toArray();
 
             $withRemarks = collect($rows)->filter(fn($r) => !empty($r['remarks']))->count();
 
             $pdf = Pdf::loadView('reports.task_report_pdf', [
-                'rows'        => $rows,
-                'period'      => $periodLabel,
-                'total'       => count($rows),
+                'rows' => $rows,
+                'period' => $periodLabel,
+                'total' => count($rows),
                 'withRemarks' => $withRemarks,
             ])->setPaper('a4', 'landscape');
 
@@ -651,13 +651,13 @@ class ReportApiController extends ApiController
         // ── Excel / CSV ──
         $flatData = [];
         foreach ($records as $report) {
-            $employee   = $report->user->employee ?? null;
+            $employee = $report->user->employee ?? null;
             $flatData[] = [
                 $report->date ? Carbon::parse($report->date)->format('d/m/Y') : 'N/A',
                 $employee->employee_id ?? 'N/A',
                 $employee
-                    ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
-                    : ($report->user->username ?? 'N/A'),
+                ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
+                : ($report->user->username ?? 'N/A'),
                 $report->tasks_completed ?? '',
                 $report->pending_tasks ?? '',
                 $report->plan_tomorrow ?? '',
@@ -665,7 +665,7 @@ class ReportApiController extends ApiController
             ];
         }
 
-        $filename  = 'task_report_' . now()->format('YmdHis');
+        $filename = 'task_report_' . now()->format('YmdHis');
         $exportObj = new TaskReportExport($flatData);
 
         // Clear all output buffers to prevent corrupted XLSX files
@@ -674,8 +674,8 @@ class ReportApiController extends ApiController
         }
 
         return match ($format) {
-            'xlsx'  => Excel::download($exportObj, $filename . '.xlsx', \Maatwebsite\Excel\Excel::XLSX),
-            default => Excel::download($exportObj, $filename . '.csv',  \Maatwebsite\Excel\Excel::CSV),
+            'xlsx' => Excel::download($exportObj, $filename . '.xlsx', \Maatwebsite\Excel\Excel::XLSX),
+            default => Excel::download($exportObj, $filename . '.csv', \Maatwebsite\Excel\Excel::CSV),
         };
     }
 

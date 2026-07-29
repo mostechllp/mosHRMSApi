@@ -10,6 +10,7 @@ use App\Models\WfhRequest;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\LeaveAllocation;
+use App\Models\Employee;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -118,7 +119,11 @@ class EmployeePortalApiController extends ApiController
             ->whereYear('start_date', date('Y'))
             ->sum('duration_days');
 
-        $leaveBalance = $employee->total_leaves_allocated - $totalLeavesTaken;
+        $totalAllocatedDays = LeaveAllocation::where('employee_id', $employee->id)
+            ->whereYear('year', date('Y'))
+            ->sum('allocated_days');
+
+        $leaveBalance = $totalAllocatedDays - $totalLeavesTaken;
 
         // Punch Access Logic
         $canPunch = true;
@@ -218,7 +223,7 @@ class EmployeePortalApiController extends ApiController
             'leave_stats' => [
                 'total_taken' => (float) $totalLeavesTaken,
                 'balance' => (float) $leaveBalance,
-                'allocated' => (float) $employee->total_leaves_allocated,
+                'allocated' => (float) $totalAllocatedDays,
             ],
             'attendance_history' => $attendanceHistory,
             'can_punch' => $canPunch,
@@ -619,17 +624,23 @@ class EmployeePortalApiController extends ApiController
     {
         $request->validate([
             'leave_type_id' => 'required|exists:leave_types,id',
-            'start_date' => 'required|date|after_or_equal:today',
+            'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
             'reason' => 'required|string|min:10',
             'claim_salary' => 'nullable|boolean',
             'document' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:2048',
             'session1' => 'nullable|in:morning,afternoon',
             'session2' => 'nullable|in:morning,afternoon',
+            'employee_id' => 'nullable',
         ]);
 
-        $user = auth('api')->user();
-        $employee = $user ? $user->employee : null;
+        if ($request->filled('employee_id')) {
+            $employee = Employee::find($request->employee_id);
+        } else {
+            $user = auth('api')->user();
+            $employee = $user ? $user->employee : null;
+        }
+
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
@@ -638,7 +649,7 @@ class EmployeePortalApiController extends ApiController
             ->where('status', '!=', 'rejected')
             ->where(function ($q) use ($request) {
                 $q->where('start_date', '<=', $request->end_date)
-                  ->where('end_date', '>=', $request->start_date);
+                    ->where('end_date', '>=', $request->start_date);
             })
             ->exists();
 
@@ -738,10 +749,16 @@ class EmployeePortalApiController extends ApiController
             'document' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:2048',
             'session1' => 'nullable|in:morning,afternoon',
             'session2' => 'nullable|in:morning,afternoon',
+            'employee_id' => 'nullable',
         ]);
 
-        $user = auth('api')->user();
-        $employee = $user ? $user->employee : null;
+        if ($request->filled('employee_id')) {
+            $employee = Employee::find($request->employee_id);
+        } else {
+            $user = auth('api')->user();
+            $employee = $user ? $user->employee : null;
+        }
+
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
@@ -761,7 +778,7 @@ class EmployeePortalApiController extends ApiController
             ->where('status', '!=', 'rejected')
             ->where(function ($q) use ($request) {
                 $q->where('start_date', '<=', $request->end_date)
-                  ->where('end_date', '>=', $request->start_date);
+                    ->where('end_date', '>=', $request->start_date);
             })
             ->exists();
 
