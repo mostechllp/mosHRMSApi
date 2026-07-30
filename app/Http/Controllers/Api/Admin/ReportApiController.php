@@ -38,14 +38,12 @@ class ReportApiController extends ApiController
         $search = $request->get('search');
         $perPage = $request->get('per_page', 500);
 
-        // Get start and end dates
         [$startDate, $endDate] = $this->getDateRange(
             $dateRange,
             $request->get('from_date'),
             $request->get('to_date')
         );
 
-        // Employees query
         $employeesQuery = Employee::with([
             'user.company',
             'user.department',
@@ -56,19 +54,16 @@ class ReportApiController extends ApiController
                     ->where('type', '!=', 'admin');
             });
 
-        // Filter by employee ID
         if ($employeeId && $employeeId !== 'all') {
-            $employeesQuery->where('employee_id', $employeeId);
+            $employeesQuery->where('id', $employeeId);
         }
 
-        // Filter by department
         if ($departmentId && $departmentId !== 'all') {
             $employeesQuery->whereHas('user', function ($query) use ($departmentId) {
                 $query->where('department_id', $departmentId);
             });
         }
 
-        // Search
         if ($search) {
             $employeesQuery->where(function ($query) use ($search) {
                 $query->where('first_name', 'like', "%{$search}%")
@@ -93,11 +88,11 @@ class ReportApiController extends ApiController
 
         $userIds = $employees->pluck('user_id')->toArray();
 
-        // Fetch working hour configuration keyed by lowercase day name
-        $workingHours = WorkingHour::all()->keyBy(fn($wh) => strtolower($wh->day));
+        $workingHours = WorkingHour::all()
+            ->keyBy(fn($wh) => strtolower($wh->day));
 
-        // Attendance logs
-        $allLogs = AttendanceLog::whereBetween('log_date', [$startDate, $endDate])
+        $allLogs = AttendanceLog::with('breaks')
+            ->whereBetween('log_date', [$startDate, $endDate])
             ->whereIn('userid', $userIds)
             ->orderBy('log_date')
             ->get()
@@ -111,55 +106,69 @@ class ReportApiController extends ApiController
         while ($currentDate->lte($lastDate)) {
 
             $date = $currentDate->toDateString();
+
             $dayLogs = $allLogs->get($date, collect());
 
-            // Determine standard hours for this day from WorkingHour config
-            $dayName = strtolower($currentDate->format('l')); // e.g. 'monday'
+            $dayName = strtolower($currentDate->format('l'));
+
             $workingHourConfig = $workingHours->get($dayName);
-            $standardHours = 8; // default fallback
-            if ($workingHourConfig && $workingHourConfig->is_enabled && $workingHourConfig->start_time && $workingHourConfig->end_time) {
+
+            $standardHours = 8;
+
+            if (
+                $workingHourConfig &&
+                $workingHourConfig->is_enabled &&
+                $workingHourConfig->start_time &&
+                $workingHourConfig->end_time
+            ) {
                 $configStart = Carbon::createFromTimeString($workingHourConfig->start_time);
                 $configEnd = Carbon::createFromTimeString($workingHourConfig->end_time);
-                $standardHours = round($configStart->diffInMinutes($configEnd) / 60, 2);
+
+                $standardHours = round(
+                    $configStart->diffInMinutes($configEnd) / 60,
+                    2
+                );
             }
 
             foreach ($employees as $employee) {
 
-                $attendance = $dayLogs->get($employee->user_id)?->first();
+                $logs = $dayLogs->get($employee->user_id, collect());
 
-                $punchIn = $attendance?->punch_in;
-                $punchOut = $attendance?->punch_out;
+                $punchIn = $logs->min('punch_in');
+                $punchOut = $logs->max('punch_out');
 
                 $workedHours = 0;
                 $overtimeMinutes = 0;
 
-                if ($punchIn) {
-                    $status = 'Present';
-                } else {
-                    $status = 'Absent';
-                }
+                $status = $punchIn ? 'Present' : 'Absent';
 
                 if ($punchIn && $punchOut) {
 
-                    $punchInTime = Carbon::parse($punchIn);
-                    $punchOutTime = Carbon::parse($punchOut);
+                    $workedMinutes = Carbon::parse($punchIn)
+                        ->diffInMinutes(Carbon::parse($punchOut));
 
-                    $workedMinutes = $punchInTime->diffInMinutes($punchOutTime);
+                    // Sum all break minutes for the day
+                    $breakMinutes = $logs->sum(function ($log) {
+                        return $log->breaks->sum('duration_minutes');
+                    });
+
+                    // Deduct breaks
+                    $workedMinutes = max(0, $workedMinutes - $breakMinutes);
+
                     $workedHours = round($workedMinutes / 60, 2);
 
-                    if ($workedHours >= 8) {
-
+                    if ($workedHours >= $standardHours) {
                         $status = 'Full Day';
-                    } elseif ($workedHours >= 4) {
-
+                    } elseif ($workedHours >= ($standardHours / 2)) {
                         $status = 'Half Day';
                     } else {
-
                         $status = 'Absent';
                     }
 
-                    // Overtime in minutes beyond the standard configured hours
-                    $overtimeMinutes = max(0, (int) round(($workedHours - $standardHours) * 60));
+                    $overtimeMinutes = max(
+                        0,
+                        $workedMinutes - ($standardHours * 60)
+                    );
                 }
 
                 $reportData[] = [
@@ -185,7 +194,6 @@ class ReportApiController extends ApiController
             $currentDate->addDay();
         }
 
-        // Sort by latest date first
         usort($reportData, function ($a, $b) {
 
             if ($a['date'] === $b['date']) {
@@ -195,7 +203,6 @@ class ReportApiController extends ApiController
             return strcmp($b['date'], $a['date']);
         });
 
-        // Pagination
         $currentPage = (int) $request->get('page', 1);
 
         $total = count($reportData);
@@ -443,49 +450,186 @@ class ReportApiController extends ApiController
     public function attendanceExport(Request $request)
     {
         $this->authenticateFromToken($request);
+
         $dateRange = $request->get('date_range', 'today');
         $employeeId = $request->get('employee_id');
         $departmentId = $request->get('department_id');
+        $search = $request->get('search');
 
-        list($startDate, $endDate) = $this->getDateRange($dateRange, $request->get('from_date'), $request->get('to_date'));
+        [$startDate, $endDate] = $this->getDateRange(
+            $dateRange,
+            $request->get('from_date'),
+            $request->get('to_date')
+        );
 
-        $empQuery = Employee::with(['user.department'])->whereRelation('user', 'status', 'active')->whereRelation('user', 'type', '!=', 'admin');
-        if ($employeeId && $employeeId !== 'all')
-            $empQuery->where('id', $employeeId);
-        if ($departmentId && $departmentId !== 'all')
-            $empQuery->whereRelation('user', 'department_id', $departmentId);
+        $employeesQuery = Employee::with([
+            'user.company',
+            'user.department',
+            'user.designation'
+        ])
+            ->whereHas('user', function ($query) {
+                $query->where('status', 'active')
+                    ->where('type', '!=', 'admin');
+            });
 
-        $employees = $empQuery->get();
-        $employeeIds = $employees->pluck('user_id')->toArray();
+        if ($employeeId && $employeeId !== 'all') {
+            $employeesQuery->where('id', $employeeId);
+        }
+
+        if ($departmentId && $departmentId !== 'all') {
+            $employeesQuery->whereHas('user', function ($query) use ($departmentId) {
+                $query->where('department_id', $departmentId);
+            });
+        }
+
+        if ($search) {
+            $employeesQuery->where(function ($query) use ($search) {
+                $query->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('employee_id', 'like', "%{$search}%");
+            });
+        }
+
+        $employees = $employeesQuery->get();
+
+        $userIds = $employees->pluck('user_id')->toArray();
+
+        $workingHours = WorkingHour::all()
+            ->keyBy(fn($item) => strtolower($item->day));
 
         $allLogs = AttendanceLog::whereBetween('log_date', [$startDate, $endDate])
-            ->whereIn('userid', $employeeIds)
+            ->whereIn('userid', $userIds)
+            ->orderBy('log_date')
             ->get()
             ->groupBy(['log_date', 'userid']);
 
         $data = [];
-        $tempDate = Carbon::parse($startDate);
-        $end = Carbon::parse($endDate);
 
-        while ($tempDate <= $end) {
-            $dateStr = $tempDate->toDateString();
-            $dayLogs = $allLogs->get($dateStr, collect());
-            foreach ($employees as $emp) {
-                $empLogs = $dayLogs->get($emp->employee_id);
-                $punchIn = $empLogs ? $empLogs->min('punch_in') : null;
-                $punchOut = $empLogs ? $empLogs->max('punch_out') : null;
-                $status = 'Absent';
-                if ($punchIn) {
-                    $time = Carbon::parse($punchIn)->format('H:i:s');
-                    $status = ($time > '08:10:59' && $time <= '12:00:00') ? 'Late' : 'Present';
-                }
-                $data[] = [$dateStr, $emp->employee_id, $emp->first_name . ' ' . $emp->last_name, $emp->user->department->name ?? 'N/A', $punchIn ? Carbon::parse($punchIn)->format('H:i') : '-', $punchOut ? Carbon::parse($punchOut)->format('H:i') : '-', $status];
+        $currentDate = Carbon::parse($startDate);
+        $lastDate = Carbon::parse($endDate);
+
+        while ($currentDate->lte($lastDate)) {
+
+            $date = $currentDate->toDateString();
+            $dayLogs = $allLogs->get($date, collect());
+
+            $dayName = strtolower($currentDate->format('l'));
+
+            $workingHourConfig = $workingHours->get($dayName);
+
+            $standardHours = 8;
+
+            if (
+                $workingHourConfig &&
+                $workingHourConfig->is_enabled &&
+                $workingHourConfig->start_time &&
+                $workingHourConfig->end_time
+            ) {
+                $start = Carbon::createFromTimeString($workingHourConfig->start_time);
+                $end = Carbon::createFromTimeString($workingHourConfig->end_time);
+
+                $standardHours = round(
+                    $start->diffInMinutes($end) / 60,
+                    2
+                );
             }
-            $tempDate->addDay();
+
+            foreach ($employees as $employee) {
+
+                $logs = $dayLogs->get($employee->user_id, collect());
+
+                $punchIn = $logs->min('punch_in');
+                $punchOut = $logs->max('punch_out');
+
+                $workedHours = 0;
+                $overtimeMinutes = 0;
+
+                $status = $punchIn ? 'Present' : 'Absent';
+
+                if ($punchIn && $punchOut) {
+
+                    $workedMinutes = Carbon::parse($punchIn)
+                        ->diffInMinutes(Carbon::parse($punchOut));
+
+                    // Total break minutes
+                    $breakMinutes = $logs->sum(function ($log) {
+                        return $log->breaks->sum('duration_minutes');
+                    });
+
+                    // Deduct break duration
+                    $workedMinutes = max(0, $workedMinutes - $breakMinutes);
+
+                    $workedHours = round($workedMinutes / 60, 2);
+
+                    if ($workedHours >= $standardHours) {
+                        $status = 'Full Day';
+                    } elseif ($workedHours >= ($standardHours / 2)) {
+                        $status = 'Half Day';
+                    } else {
+                        $status = 'Absent';
+                    }
+
+                    $overtimeMinutes = max(
+                        0,
+                        $workedMinutes - ($standardHours * 60)
+                    );
+                }
+
+                $data[] = [
+                    $employee->employee_id,
+                    trim($employee->first_name . ' ' . $employee->last_name),
+                    $employee->user->department->name ?? 'N/A',
+                    $employee->user->designation->name ?? 'N/A',
+                    $employee->user->company->name ?? 'N/A',
+                    $date,
+                    $punchIn ? Carbon::parse($punchIn)->format('h:i A') : '-',
+                    $punchOut ? Carbon::parse($punchOut)->format('h:i A') : '-',
+                    $this->formatWorkedHours($workedHours),
+                    $standardHours,
+                    $this->formatOvertimeMinutes($overtimeMinutes),
+                    $status,
+                ];
+            }
+
+            $currentDate->addDay();
         }
 
-        return $this->downloadResponse(new AttendanceExport($data), "attendance_report", $request->get('format'));
+        usort($data, function ($a, $b) {
+            if ($a[5] == $b[5]) {
+                return strcmp($a[0], $b[0]);
+            }
+
+            return strcmp($b[5], $a[5]);
+        });
+
+        return $this->downloadResponse(
+            new AttendanceExport($data),
+            "attendance_report",
+            $request->get('format')
+        );
     }
+
+    private function formatWorkedHours($hours): string
+{
+    if ($hours <= 0) {
+        return '--';
+    }
+
+    $totalMinutes = (int) round($hours * 60);
+
+    $hrs = intdiv($totalMinutes, 60);
+    $mins = $totalMinutes % 60;
+
+    if ($hrs == 0) {
+        return "{$mins} mins";
+    }
+
+    if ($mins == 0) {
+        return "{$hrs} hrs";
+    }
+
+    return "{$hrs} hrs {$mins} mins";
+}
 
     public function leaveExport(Request $request)
     {
@@ -519,7 +663,7 @@ class ReportApiController extends ApiController
             $session1 = $sessionMap[$leave->session1] ?? 'N/A';
             $session2 = $sessionMap[$leave->session2] ?? 'N/A';
 
-            $data[] = [$leave->employee->employee_id ?? 'N/A', ($leave->employee->first_name ?? '') . ' ' . ($leave->employee->last_name ?? ''), $leave->leaveType->name ?? 'N/A', $leave->start_date->toDateString(), $leave->end_date->toDateString(), $leave->duration_days, $session1.' - '.$session2, ucfirst($leave->status), $leave->reason];
+            $data[] = [$leave->employee->employee_id ?? 'N/A', ($leave->employee->first_name ?? '') . ' ' . ($leave->employee->last_name ?? ''), $leave->leaveType->name ?? 'N/A', $leave->start_date->toDateString(), $leave->end_date->toDateString(), $session1 . ' - ' . $session2, $leave->duration_days, ucfirst($leave->status), $leave->reason];
         }
 
         return $this->downloadResponse(new LeaveExport($data), "leave_report", $request->get('format'));
@@ -782,7 +926,7 @@ class ReportApiController extends ApiController
         foreach ($query->get() as $leave) {
             $session1 = $sessionMap[$leave->session1] ?? 'N/A';
             $session2 = $sessionMap[$leave->session2] ?? 'N/A';
-            $data[] = [$leave->employee->employee_id ?? 'N/A', ($leave->employee->first_name ?? '') . ' ' . ($leave->employee->last_name ?? ''), $leave->leaveType->name ?? 'N/A', $leave->start_date->toDateString(), $leave->end_date->toDateString(), $leave->duration_days, $session1.' - '.$session2, ucfirst($leave->status), $leave->reason];
+            $data[] = [$leave->employee->employee_id ?? 'N/A', ($leave->employee->first_name ?? '') . ' ' . ($leave->employee->last_name ?? ''), $leave->leaveType->name ?? 'N/A', $leave->start_date->toDateString(), $leave->end_date->toDateString(), $session1 . ' - ' . $session2, $leave->duration_days,  ucfirst($leave->status), $leave->reason];
         }
 
         return $this->downloadResponse(new LeaveExport($data), "pending_leave_request_report", $request->get('format'));
@@ -799,9 +943,8 @@ class ReportApiController extends ApiController
 
         $headings = [
             'Company Name',
-            'Trade License Number',
+            'Trade License',
             'Trade License Expiry',
-            'Establishment Card Number',
             'Establishment Card Expiry',
         ];
 
@@ -809,9 +952,8 @@ class ReportApiController extends ApiController
         foreach ($companies as $company) {
             $data[] = [
                 $company->company_name ?? 'N/A',
-                $company->trade_license_number ?? 'N/A',
+                $company->trade_license ?? 'N/A',
                 $company->trade_license_expiry ?? 'N/A',
-                $company->establishment_card_number ?? 'N/A',
                 $company->establishment_card_expiry ?? 'N/A',
             ];
         }
@@ -836,9 +978,8 @@ class ReportApiController extends ApiController
 
         $headings = [
             'Company Name',
-            'Trade License Number',
+            'Trade License',
             'Trade License Expiry',
-            'Establishment Card Number',
             'Establishment Card Expiry',
         ];
 
@@ -846,9 +987,8 @@ class ReportApiController extends ApiController
         foreach ($companies as $company) {
             $data[] = [
                 $company->company_name ?? 'N/A',
-                $company->trade_license_number ?? 'N/A',
+                $company->trade_license ?? 'N/A',
                 $company->trade_license_expiry ?? 'N/A',
-                $company->establishment_card_number ?? 'N/A',
                 $company->establishment_card_expiry ?? 'N/A',
             ];
         }
