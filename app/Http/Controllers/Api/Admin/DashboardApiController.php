@@ -8,6 +8,7 @@ use App\Models\AttendanceLog;
 use App\Models\Document;
 use App\Models\User;
 use App\Models\Party;
+use App\Models\Task;
 use App\Models\Folder;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -64,6 +65,8 @@ class DashboardApiController extends ApiController
                 $doc->shared_users = User::whereIn('id', $doc->share_with ?? [])->get();
                 return $doc;
             });
+
+        $tasks = Task::get();
 
         $folders = Folder::all();
 
@@ -134,7 +137,8 @@ class DashboardApiController extends ApiController
             'metadata' => [
                 'share_with' => $share_with,
                 'parties' => $parties,
-            ]
+            ],
+            'tasks' => $tasks
         ]);
     }
 
