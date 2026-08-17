@@ -18,6 +18,15 @@ return new class extends Migration
             $table->string('moh_license_number')->nullable();
             $table->date('dob')->nullable();
             $table->date('joining_date')->nullable();
+            $table->date('probation_start_date')->nullable();
+            $table->date('probation_end_date')->nullable();
+            $table->date('confirmation_date')->nullable();
+            $table->date('contract_start_date')->nullable();
+            $table->date('contract_end_date')->nullable();
+            $table->date('notice_period_start_date')->nullable();
+            $table->date('last_working_day')->nullable();
+            $table->date('resignation_date')->nullable();
+            $table->date('relieving_date')->nullable();
             $table->string('gender')->nullable();
             $table->string('marital_status', 100)->nullable();
             $table->string('nationality', 225)->nullable();

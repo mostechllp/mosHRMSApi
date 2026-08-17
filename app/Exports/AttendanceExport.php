@@ -25,7 +25,19 @@ class AttendanceExport implements FromArray, WithHeadings, WithStyles, ShouldAut
 
     public function headings(): array
     {
-        return ['Date', 'Employee ID', 'Name', 'Department', 'Punch In', 'Punch Out', 'Status'];
+        return ['Employee ID',
+        'Employee Name',
+        'Department',
+        'Designation',
+        'Company',
+        'Date',
+        'Punch In',
+        'Punch Out',
+        'Worked Hours',
+        'Standard Hours',
+        'Overtime',
+        'Status'
+        ];
     }
 
     public function title(): string

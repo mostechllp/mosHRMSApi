@@ -43,6 +43,15 @@ class Employee extends Model
         'employee_id',
         'dob',
         'joining_date',
+        'probation_start_date',
+        'probation_end_date',
+        'confirmation_date',
+        'contract_start_date',
+        'contract_end_date',
+        'notice_period_start_date',
+        'last_working_day',
+        'resignation_date',
+        'relieving_date',
         'gender',
         'special_days',
         'passport_full_name',
@@ -166,7 +175,7 @@ class Employee extends Model
     public function tasks()
     {
         return $this->belongsToMany(Task::class, 'task_employee')
-                    ->withPivot('status')
-                    ->withTimestamps();
+            ->withPivot('status')
+            ->withTimestamps();
     }
 }

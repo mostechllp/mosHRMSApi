@@ -107,22 +107,35 @@ class TaskApiController extends ApiController
             'priority' => 'nullable|in:low,medium,high',
             'assigned_to' => 'nullable|array',
             'assigned_to.*' => 'exists:employees,id',
-            'status' => 'nullable|in:assigned,in_progress,completed,on_hold',
         ]);
 
-        $taskData = collect($validated)->except(['status', 'assigned_to'])->toArray();
+        $taskData = collect($validated)->except(['assigned_to'])->toArray();
         $task->update($taskData);
 
-        // if ($request->has('assigned_to')) {
-        //     $status = $request->input('status');
-        //     $syncData = [];
-        //     foreach ($request->assigned_to as $employeeId) {
-        //         $syncData[$employeeId] = ['status' => $status];
-        //     }
-        //     $task->assignedTo()->sync($syncData);
-        // }
+        if ($request->has('assigned_to')) {
 
-        return $this->success($task->load(['assignedTo', 'project.department']), 'Task updated successfully');
+            // Get existing assigned employees with their pivot status
+            $existingAssignments = $task->assignedTo()
+                ->pluck('task_employee.status', 'employees.id')
+                ->toArray();
+
+            $syncData = [];
+
+            foreach ($request->assigned_to as $employeeId) {
+
+                $syncData[$employeeId] = [
+                    // Keep existing status if employee already assigned
+                    'status' => $existingAssignments[$employeeId] ?? 'assigned',
+                ];
+            }
+
+            $task->assignedTo()->sync($syncData);
+        }
+
+        return $this->success(
+            $task->load(['assignedTo', 'project.department']),
+            'Task updated successfully'
+        );
     }
 
     public function listEmployees()
