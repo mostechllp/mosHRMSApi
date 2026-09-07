@@ -55,7 +55,7 @@ class ReportApiController extends ApiController
             });
 
         if ($employeeId && $employeeId !== 'all') {
-            $employeesQuery->where('id', $employeeId);
+            $employeesQuery->where('user_id', $employeeId);
         }
 
         if ($departmentId && $departmentId !== 'all') {
@@ -145,15 +145,15 @@ class ReportApiController extends ApiController
                 if ($punchIn && $punchOut) {
 
                     $workedMinutes = Carbon::parse($punchIn)
-                        ->diffInMinutes(Carbon::parse($punchOut));
+                        ->diffInMinutes(Carbon::parse($punchOut));        
 
                     // Sum all break minutes for the day
                     $breakMinutes = $logs->sum(function ($log) {
                         return $log->breaks->sum('duration_minutes');
                     });
 
-                    // Deduct breaks
-                    $workedMinutes = max(0, $workedMinutes - $breakMinutes);
+                    $excessBreakMinutes = max(0, $breakMinutes - 60);
+                    $workedMinutes = max(0, $workedMinutes - $excessBreakMinutes);
 
                     $workedHours = round($workedMinutes / 60, 2);
 
@@ -187,6 +187,7 @@ class ReportApiController extends ApiController
                     'worked_hours' => $workedHours,
                     'standard_hours' => $standardHours,
                     'overtime' => $this->formatOvertimeMinutes($overtimeMinutes),
+                    'is_overtime' => $logs->contains('is_overtime', 1) ? 'Yes' : 'No',
                     'status' => $status,
                 ];
             }
@@ -330,12 +331,14 @@ class ReportApiController extends ApiController
      */
     public function employeeNearestExpiry(): JsonResponse
     {
-        $threshold = Carbon::now()->addDays(30);
-        $employees = Employee::where(function ($query) use ($threshold) {
-            $query->whereDate('passport_expiry_date', '<=', $threshold)
-                ->orWhereDate('visa_expiry_date', '<=', $threshold)
-                ->orWhereDate('labor_expiry_date', '<=', $threshold)
-                ->orWhereDate('eid_expiry_date', '<=', $threshold);
+        $today = Carbon::today();
+        $threshold = Carbon::today()->addDays(30);
+
+        $employees = Employee::where(function ($query) use ($today, $threshold) {
+            $query->whereBetween('passport_expiry_date', [$today, $threshold])
+                ->orWhereBetween('visa_expiry_date', [$today, $threshold])
+                ->orWhereBetween('labor_expiry_date', [$today, $threshold])
+                ->orWhereBetween('eid_expiry_date', [$today, $threshold]);
         })->get();
 
         return $this->success([
@@ -610,26 +613,26 @@ class ReportApiController extends ApiController
     }
 
     private function formatWorkedHours($hours): string
-{
-    if ($hours <= 0) {
-        return '--';
+    {
+        if ($hours <= 0) {
+            return '--';
+        }
+
+        $totalMinutes = (int) round($hours * 60);
+
+        $hrs = intdiv($totalMinutes, 60);
+        $mins = $totalMinutes % 60;
+
+        if ($hrs == 0) {
+            return "{$mins} mins";
+        }
+
+        if ($mins == 0) {
+            return "{$hrs} hrs";
+        }
+
+        return "{$hrs} hrs {$mins} mins";
     }
-
-    $totalMinutes = (int) round($hours * 60);
-
-    $hrs = intdiv($totalMinutes, 60);
-    $mins = $totalMinutes % 60;
-
-    if ($hrs == 0) {
-        return "{$mins} mins";
-    }
-
-    if ($mins == 0) {
-        return "{$hrs} hrs";
-    }
-
-    return "{$hrs} hrs {$mins} mins";
-}
 
     public function leaveExport(Request $request)
     {
@@ -873,8 +876,8 @@ class ReportApiController extends ApiController
                 $report->date ? Carbon::parse($report->date)->format('d/m/Y') : 'N/A',
                 $employee->employee_id ?? 'N/A',
                 $employee
-                    ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
-                    : ($report->user->username ?? 'N/A'),
+                ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
+                : ($report->user->username ?? 'N/A'),
                 $report->tasks_completed ?? '',
                 $report->pending_tasks ?? '',
                 $report->plan_tomorrow ?? '',
@@ -926,7 +929,7 @@ class ReportApiController extends ApiController
         foreach ($query->get() as $leave) {
             $session1 = $sessionMap[$leave->session1] ?? 'N/A';
             $session2 = $sessionMap[$leave->session2] ?? 'N/A';
-            $data[] = [$leave->employee->employee_id ?? 'N/A', ($leave->employee->first_name ?? '') . ' ' . ($leave->employee->last_name ?? ''), $leave->leaveType->name ?? 'N/A', $leave->start_date->toDateString(), $leave->end_date->toDateString(), $session1 . ' - ' . $session2, $leave->duration_days,  ucfirst($leave->status), $leave->reason];
+            $data[] = [$leave->employee->employee_id ?? 'N/A', ($leave->employee->first_name ?? '') . ' ' . ($leave->employee->last_name ?? ''), $leave->leaveType->name ?? 'N/A', $leave->start_date->toDateString(), $leave->end_date->toDateString(), $session1 . ' - ' . $session2, $leave->duration_days, ucfirst($leave->status), $leave->reason];
         }
 
         return $this->downloadResponse(new LeaveExport($data), "pending_leave_request_report", $request->get('format'));

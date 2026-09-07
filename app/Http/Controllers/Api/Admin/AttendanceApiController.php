@@ -51,9 +51,9 @@ class AttendanceApiController extends ApiController
             ->groupBy('userid')
             ->get()
             ->keyBy('userid'); // assuming userid in AttendanceLog is employee_id (string) or user_id (int). Based on codebase, it's usually employee_id or user_id. Wait, AttendanceLog uses user_id or employee_id?
-            // In DashboardApiController: $todayLogs = AttendanceLog::whereDate('log_date', $today)... ->groupBy('userid')->get();
-            // Let's assume userid maps to user_id or employee_id. The previous code uses it.
-            // Let's key by userid to easily check.
+        // In DashboardApiController: $todayLogs = AttendanceLog::whereDate('log_date', $today)... ->groupBy('userid')->get();
+        // Let's assume userid maps to user_id or employee_id. The previous code uses it.
+        // Let's key by userid to easily check.
 
         $result = [
             'total' => ['count' => 0, 'employees' => []],
@@ -129,7 +129,8 @@ class AttendanceApiController extends ApiController
     {
         $perPage = 100;
         $companyId = $request->get('company_id');
-        $employeeName = $request->get('employee_name');
+        $employeeName = $request->get('search');
+        $employeeId = $request->get('employee_id');
         $datePreset = $request->get('date_preset', 'all');
 
         $query = AttendanceLog::with(['company', 'user.employee', 'user.department', 'breaks'])
@@ -159,6 +160,10 @@ class AttendanceApiController extends ApiController
                 $q->where('first_name', 'like', "%$employeeName%")
                     ->orWhere('last_name', 'like', "%$employeeName%");
             });
+        }
+
+        if ($employeeId) {
+            $query->where('userid', $employeeId);
         }
 
         if ($datePreset != 'all') {
@@ -340,37 +345,40 @@ class AttendanceApiController extends ApiController
     #[OA\Response(response: 200, description: 'Attendance updated successfully')]
     #[OA\Response(response: 404, description: 'Attendance record not found')]
     #[OA\Response(response: 422, description: 'Validation error')]
-   public function update(Request $request, $id): JsonResponse
+    public function update(Request $request, $id): JsonResponse
     {
         try {
             $attendance = AttendanceLog::find($id);
             if (!$attendance) {
                 return $this->error('Attendance record not found', 404);
             }
-    
+
             $request->validate([
-                'company_id'        => 'nullable|exists:companies,id',
-                'log_date'          => 'sometimes|required|date',
-                'punch_in'          => 'sometimes|required|date_format:Y-m-d H:i:s',
-                'punch_out'         => 'nullable|date_format:Y-m-d H:i:s|after_or_equal:punch_in',
+                'company_id' => 'nullable|exists:companies,id',
+                'log_date' => 'sometimes|required|date',
+                'punch_in' => 'sometimes|required|date_format:Y-m-d H:i:s',
+                'punch_out' => 'nullable|date_format:Y-m-d H:i:s|after_or_equal:punch_in',
                 'attendance_status' => 'nullable|in:present,absent,late,early_out,half_day,wfh'
             ]);
-    
+
             // Calculate working hours only if both values are present
             $workingMinutes = null;
             if ($request->punch_in && $request->punch_out) {
-                $punchIn  = Carbon::parse($request->punch_in);
+                $punchIn = Carbon::parse($request->punch_in);
                 $punchOut = Carbon::parse($request->punch_out);
-                $workingMinutes = $punchIn->diffInMinutes($punchOut);
+                $totalMinutes = $punchIn->diffInMinutes($punchOut);
+                $breakMinutes = (int) $attendance->breaks()->sum('duration_minutes');
+                $excessBreakMinutes = max(0, $breakMinutes - 60);
+                $workingMinutes = max(0, $totalMinutes - $excessBreakMinutes);
             }
-    
+
             $attendance->update(array_merge(
                 $request->only(['company_id', 'log_date', 'punch_in', 'punch_out', 'attendance_status']),
                 ['working_hours' => $workingMinutes]
             ));
-    
+
             return $this->success($attendance, 'Attendance updated successfully.');
-    
+
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->error($e->getMessage(), 422, $e->errors());
         } catch (\Exception $e) {
@@ -773,7 +781,7 @@ class AttendanceApiController extends ApiController
 
             $request->validate([
                 'start_time' => 'sometimes|required|date_format:Y-m-d H:i:s',
-                'end_time'   => 'nullable|date_format:Y-m-d H:i:s|after_or_equal:start_time',
+                'end_time' => 'nullable|date_format:Y-m-d H:i:s|after_or_equal:start_time',
             ]);
 
             $startTime = $request->input('start_time', $break->start_time ? $break->start_time->format('Y-m-d H:i:s') : null);

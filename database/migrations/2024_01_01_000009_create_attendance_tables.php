@@ -27,6 +27,7 @@ return new class extends Migration
             $table->decimal('punch_out_longitude', 11, 8)->nullable();
             $table->text('punch_out_address')->nullable();
             $table->unsignedInteger('working_hours')->nullable()->default(0);
+            $table->boolean('is_overtime')->nullable()->default(0);
             $table->integer('created_by')->nullable();
             $table->integer('deleted_by')->nullable();
             $table->timestamps();
