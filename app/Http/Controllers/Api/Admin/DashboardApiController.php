@@ -9,6 +9,7 @@ use App\Models\Document;
 use App\Models\User;
 use App\Models\Party;
 use App\Models\Task;
+use App\Models\Project;
 use App\Models\Folder;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -67,6 +68,7 @@ class DashboardApiController extends ApiController
             });
 
         $tasks = Task::get();
+        $projects = Project::get();
 
         $folders = Folder::all();
 
@@ -138,7 +140,8 @@ class DashboardApiController extends ApiController
                 'share_with' => $share_with,
                 'parties' => $parties,
             ],
-            'tasks' => $tasks
+            'tasks' => $tasks,
+            'projects' => $projects
         ]);
     }
 

@@ -25,6 +25,7 @@ class AttendanceLog extends Model
         'punch_out_longitude',
         'punch_out_address',
         'timezone',
+        'is_overtime',
         'working_hours'
     ];
 

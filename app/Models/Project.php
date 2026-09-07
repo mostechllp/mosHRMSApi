@@ -26,11 +26,17 @@ class Project extends Model
         'domain_purchased_from',
         'is_email_purchased',
         'status',
+        'special_dates',
         'project_manager_id',
         'team_lead_id',
         'created_by',
         'deleted_by',
     ];
+
+    protected $casts = [
+        'special_dates' => 'array',
+    ];
+
 
     public function emails()
     {

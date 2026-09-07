@@ -9,6 +9,35 @@ use Illuminate\Http\JsonResponse;
 
 class ProjectApiController extends ApiController
 {
+    public const STATUSES = [
+        'Active',
+        'Completed',
+        'On-hold',
+        'In-progress',
+        'Proposal Created',
+        'Proposal Sent',
+        'Proposal Approved',
+        'Quotation Created',
+        'Quotation Sent',
+        'Quotation Approved',
+        'Invoice Created',
+        'Invoice Sent',
+        'Invoice Received',
+        'Payment Pending',
+        'Payment Received',
+        'Project Started',
+        'Project In Progress',
+        'Project Completed',
+    ];
+
+    /**
+     * Get the list of available project statuses.
+     */
+    public function getStatuses(): JsonResponse
+    {
+        return $this->success(self::STATUSES);
+    }
+
     /**
      * Display a listing of the projects.
      */
@@ -69,16 +98,21 @@ class ProjectApiController extends ApiController
             'domain_expiry_date' => 'nullable|date',
             'domain_purchased_from' => 'nullable|string|max:255',
             'is_email_purchased' => 'nullable|boolean',
-            'status' => 'nullable|in:Active,Completed,On-hold,In-progress',
+            'status' => 'nullable|in:' . implode(',', self::STATUSES),
             'project_manager_id' => 'nullable|exists:employees,id',
             'team_lead_id' => 'nullable|exists:employees,id',
             'emails' => 'nullable|array',
             'emails.*.email_name' => 'nullable|string|max:255',
             'emails.*.purchase_date' => 'nullable|date',
             'emails.*.expiry_date' => 'nullable|date',
+            'special_dates_name.*' => 'nullable|string|max:255',
+            'special_dates_date.*' => 'nullable|date',
         ]);
 
         $validated['created_by'] = auth()->id();
+
+        $validated = $this->handleSpecialDays($request, $validated);
+
         $project = Project::create($validated);
 
         if ($request->has('emails')) {
@@ -117,14 +151,18 @@ class ProjectApiController extends ApiController
             'domain_expiry_date' => 'nullable|date',
             'domain_purchased_from' => 'nullable|string|max:255',
             'is_email_purchased' => 'nullable|boolean',
-            'status' => 'nullable|in:Active,Completed,On-hold,In-progress',
+            'status' => 'nullable|in:' . implode(',', self::STATUSES),
             'project_manager_id' => 'nullable|exists:employees,id',
             'team_lead_id' => 'nullable|exists:employees,id',
             'emails' => 'nullable|array',
             'emails.*.email_name' => 'required|string|max:255',
             'emails.*.purchase_date' => 'nullable|date',
             'emails.*.expiry_date' => 'nullable|date',
+            'special_dates_name.*' => 'nullable|string|max:255',
+            'special_dates_date.*' => 'nullable|date',
         ]);
+
+        $validated = $this->handleSpecialDays($request, $validated);
 
         $project->update($validated);
 
@@ -134,6 +172,29 @@ class ProjectApiController extends ApiController
         }
 
         return $this->success($project->load('emails'), 'Project updated successfully');
+    }
+
+    private function handleSpecialDays(Request $request, array $data): array
+    {
+        $names = $request->special_dates_name;
+        $dates = $request->special_dates_date;
+
+        $specialDates = [];
+
+        if ($names && is_array($names)) {
+            foreach ($names as $key => $name) {
+                if ($name) {
+                    $specialDates[] = [
+                        'name' => $name,
+                        'date' => $dates[$key] ?? null,
+                    ];
+                }
+            }
+        }
+
+        $data['special_dates'] = !empty($specialDates) ? $specialDates : null;
+
+        return $data;
     }
 
     /**

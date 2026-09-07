@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Admin\OrganizationApiController;
 use App\Http\Controllers\Api\Admin\CompanyApiController;
 use App\Http\Controllers\Api\Admin\HRApiController;
 use App\Http\Controllers\Api\Admin\TaskApiController;
+use App\Http\Controllers\Api\Admin\HolidayApiController;
 use App\Http\Controllers\Api\Admin\DashboardApiController;
 use App\Http\Controllers\Api\Admin\PartyApiController;
 use App\Http\Controllers\Api\Admin\DocumentApiController;
@@ -38,6 +39,7 @@ use App\Http\Controllers\Api\Admin\EmployeeOnboardingApiController;
 use App\Http\Controllers\Api\Admin\WorkingHourApiController;
 use App\Http\Controllers\Api\Admin\AssetTypeApiController;
 use App\Http\Controllers\Api\Admin\AssetApiController;
+use App\Http\Controllers\Api\Admin\PayrollController;
 use App\Http\Controllers\Api\Admin\OffboardingChecklistCategoryController;
 
 
@@ -106,9 +108,10 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::delete('bank-details/{id}', [EmployeeBankDetailApiController::class, 'destroy'])->middleware('permission:employees.edit');
 
     // Employee Salary Components
+    Route::post('salary-components', [EmployeeSalaryComponentApiController::class, 'store'])->middleware('permission:employees.edit');
     Route::put('salary-components/{id}', [EmployeeSalaryComponentApiController::class, 'update'])->middleware('permission:employees.edit');
     Route::delete('salary-components/{id}', [EmployeeSalaryComponentApiController::class, 'destroy'])->middleware('permission:employees.edit');
-
+    Route::get('salary-components/employee/{id}', [EmployeeSalaryComponentApiController::class, 'getSalaryComponents'])->middleware('permission:employees.edit');
 
     // Attendance
     Route::get('attendance/stats', [AttendanceApiController::class, 'stats'])->middleware('permission:attendance.read');
@@ -145,6 +148,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
 
     // Projects
     Route::get('projects/eligible-managers', [ProjectApiController::class, 'getEligibleManagers']);
+    Route::get('projects/statuses', [ProjectApiController::class, 'getStatuses']);
     Route::apiResource('projects', ProjectApiController::class);
     Route::get('project-assignments', [ProjectAssignmentApiController::class, 'index']);
     Route::get('project-assignments/{id}', [ProjectAssignmentApiController::class, 'show']);
@@ -196,6 +200,33 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
 
     // Task Reports (Admin)
     Route::apiResource('task-reports', AdminTaskReportApiController::class)->middleware('permission:reports.read');
+
+    // Holidays (Admin)
+    Route::apiResource('holidays', HolidayApiController::class)->middleware('permission:settings.read');
+
+    Route::group(['prefix' => 'payroll', 'middleware' => 'permission:payroll.read'], function () {
+        Route::get('stats', [PayrollController::class, 'stats']);
+        Route::get('employees', [PayrollController::class, 'getEmployees']);
+        Route::get('/', [PayrollController::class, 'index']);
+        Route::get('history', [PayrollController::class, 'history']);
+        Route::get('working-days', [PayrollController::class, 'getWorkingDays']);
+        Route::get('leaves', [PayrollController::class, 'getLeaves']);
+        Route::get('draft/{employee_id}', [PayrollController::class, 'getDraft']);
+        Route::get('employee-summary/{employee_id}', [PayrollController::class, 'employeeSalarySummary']);
+        Route::get('{id}/download', [PayrollController::class, 'downloadPayslip']);
+        Route::get('{id}', [PayrollController::class, 'show']);
+
+        Route::post('calculate', [PayrollController::class, 'calculateMonthlySalary'])->middleware('permission:payroll.edit');
+        Route::post('overtime', [PayrollController::class, 'calculateOvertime'])->middleware('permission:payroll.edit');
+        Route::post('summary', [PayrollController::class, 'calculateTotals'])->middleware('permission:payroll.edit');
+        Route::post('save-step', [PayrollController::class, 'saveStep'])->middleware('permission:payroll.edit');
+        Route::post('submit', [PayrollController::class, 'submitPayroll'])->middleware('permission:payroll.edit');
+        Route::post('generate', [PayrollController::class, 'generatePayroll'])->middleware('permission:payroll.edit');
+        Route::post('convert-salary', [PayrollController::class, 'convertSalary'])->middleware('permission:payroll.edit');
+        Route::post('{id}/send-payslip', [PayrollController::class, 'sendPayslip'])->middleware('permission:payroll.edit');
+        Route::put('{id}', [PayrollController::class, 'update'])->middleware('permission:payroll.edit');
+        Route::delete('{id}', [PayrollController::class, 'destroy'])->middleware('permission:payroll.edit');
+    });
 
     // Reports
     Route::group(['prefix' => 'reports', 'middleware' => 'permission:reports.read'], function () {

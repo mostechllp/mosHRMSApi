@@ -331,6 +331,7 @@ class EmployeePortalApiController extends ApiController
             'plan_tomorrow' => 'nullable|string',
             'remarks' => 'nullable|string',
             'punch_out_time' => 'nullable|date',
+            'is_overtime' => 'nullable|boolean'
         ]);
 
         $user = auth('api')->user();
@@ -362,7 +363,8 @@ class EmployeePortalApiController extends ApiController
         $punchIn = Carbon::parse($log->punch_in);
         $totalMinutes = $punchIn->diffInMinutes($punchOutTime);
         $breakMinutes = (int) $log->breaks()->sum('duration_minutes');
-        $workingMinutes = max(0, $totalMinutes - $breakMinutes);
+        $excessBreakMinutes = max(0, $breakMinutes - 60);
+        $workingMinutes = max(0, $totalMinutes - $excessBreakMinutes);
 
         // Validate punch out date matches attendance date
         if ($punchOutTime->toDateString() !== $attendanceDate) {
@@ -402,6 +404,7 @@ class EmployeePortalApiController extends ApiController
             'punch_out_longitude' => $request->longitude,
             'punch_out_address' => $request->address,
             'log_status' => 'OUT',
+            'is_overtime' => $request->is_overtime ? 1 : 0
         ]);
 
         $message = $attendanceDate === now()->toDateString()
