@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Notifications\DocumentExpiryNotification;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Log;
 
 class CheckDocumentExpiry extends Command
 {
@@ -36,7 +37,9 @@ class CheckDocumentExpiry extends Command
         $today = Carbon::today();
         $thresholdDate = $today->copy()->addDays($thresholdDays);
 
-        $adminUsers = User::all();
+        $adminUsers = User::whereIn('type', ['hr'])
+            ->where('status', 'active')
+            ->get();
 
         if ($adminUsers->isEmpty()) {
             $this->warn('No admin users found to notify.');
@@ -74,22 +77,52 @@ class CheckDocumentExpiry extends Command
             $expiringEmployees = Employee::whereBetween($field, [$today, $thresholdDate])->get();
 
             foreach ($expiringEmployees as $employee) {
+                $employeeName = trim($employee->first_name . ' ' . $employee->last_name);
                 $data = [
                     'type' => 'employee_document',
-                    'name' => "{$label} ({$employee->name})",
+                    'name' => "{$label} ({$employeeName})",
                     'expiry_date' => $employee->$field,
-                    'owner' => $employee->name,
-                    'message' => "The {$label} for employee '{$employee->name}' is expiring on {$employee->$field}."
+                    'owner' => $employeeName,
+                    'message' => "The {$label} for employee '{$employeeName}' is expiring on {$employee->$field}."
                 ];
 
                 Notification::send($adminUsers, new DocumentExpiryNotification($data));
                 $notifiedCount++;
 
-                Log::info("Employee doc notified: {$emp->name} - {$label}");
+                Log::info("Employee doc notified: {$employeeName} - {$label}");
+            }
+        }
+
+        // Check Employee additional_documents
+        $employeesWithAdditionalDocs = Employee::whereNotNull('additional_documents')->get();
+        foreach ($employeesWithAdditionalDocs as $employee) {
+            $employeeName = trim($employee->first_name . ' ' . $employee->last_name);
+            $additionalDocs = $employee->additional_documents ?? [];
+            if (is_array($additionalDocs)) {
+                foreach ($additionalDocs as $doc) {
+                    if (isset($doc['expiry_date']) && $doc['expiry_date']) {
+                        $expiryDate = $doc['expiry_date'];
+                        if ($expiryDate >= $today->toDateString() && $expiryDate <= $thresholdDate->toDateString()) {
+                            $label = $doc['document_name'] ?? 'Additional Document';
+                            $data = [
+                                'type' => 'employee_document',
+                                'name' => "{$label} ({$employeeName})",
+                                'expiry_date' => $expiryDate,
+                                'owner' => $employeeName,
+                                'message' => "The {$label} for employee '{$employeeName}' is expiring on {$expiryDate}."
+                            ];
+
+                            Notification::send($adminUsers, new DocumentExpiryNotification($data));
+                            $notifiedCount++;
+
+                            Log::info("Employee doc notified: {$employeeName} - {$label}");
+                        }
+                    }
+                }
             }
         }
 
         $this->info("Check complete. Sent {$notifiedCount} notifications.");
-        Log::info("Employee doc notified: {$emp->name} - {$label}");
+        Log::info("Check complete. Sent {$notifiedCount} notifications.");
     }
 }

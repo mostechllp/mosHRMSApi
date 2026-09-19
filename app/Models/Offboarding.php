@@ -4,21 +4,32 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Offboarding extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'employee_id',
+        'reporting_manager_id',
         'status',
         'last_working_day',
+        'resignation_date',
         'separation_type',
         'notice_period_days',
         'notice_start_date',
         'visa_sponsorship',
         'nationality',
-        'reason_for_leaving'
+        'reason_for_leaving',
+        'cancellation_status',
+        'cancellation_date',
+        'cancellation_reference',
+        'cancellation_document',
+        'cancellation_remarks',
+        'exit_initiation_date',
+        'acceptance_status',
+        'resignation_reason'
     ];
 
     public function employee()
@@ -50,5 +61,27 @@ class Offboarding extends Model
     {
         return $this->hasMany(OffboardingLetter::class);
     }
+
+    public function handover()
+    {
+        return $this->hasOne(OffboardingHandover::class);
+    }
+
+    public function leaveVerification()
+    {
+        return $this->hasOne(OffboardingLeaveVerification::class);
+    }
+
+    public function accessRemoval()
+    {
+        return $this->hasOne(OffboardingAccessRemoval::class);
+    }
+
+    public function reportingManager()
+    {
+        return $this->belongsTo(Employee::class, 'reporting_manager_id', 'id');
+    }
+
+
 }
 

@@ -74,6 +74,10 @@ class FolderApiController extends ApiController
             'deleted_by' => Auth::id()
         ]);
 
+        // Delete all documents inside the folder
+        $folder->documents()->delete();
+
+        // Delete the folder
         $folder->delete();
 
         return $this->success(null, 'Folder deleted successfully');

@@ -420,7 +420,7 @@ class EmployeePortalApiController extends ApiController
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
-        $reports = TaskReport::where('employee_id', $employee->id)->latest()->get();
+        $reports = TaskReport::where('employee_id', $employee->id)->get()->orderBy('date', 'desc');
         return $this->success($reports);
     }
 

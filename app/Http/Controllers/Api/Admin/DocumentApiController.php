@@ -137,8 +137,10 @@ class DocumentApiController extends ApiController
             }
 
             // Delete old file
-            if ($document->file_path &&
-                Storage::disk('public')->exists($document->file_path)) {
+            if (
+                $document->file_path &&
+                Storage::disk('public')->exists($document->file_path)
+            ) {
 
                 Storage::disk('public')->delete($document->file_path);
             }

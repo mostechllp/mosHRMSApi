@@ -31,7 +31,7 @@ class EmployeePortalApiController extends ApiController
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
-        $user->load('department', 'company', 'designation');
+        $user->load('department', 'company', 'designation', 'role');
 
         $today = Carbon::today()->toDateString();
 
@@ -41,7 +41,7 @@ class EmployeePortalApiController extends ApiController
             ->select('punch_in', 'punch_out', 'punch_in_latitude', 'punch_in_longitude', 'punch_in_address', 'punch_out_latitude', 'punch_out_longitude', 'punch_out_address', 'working_hours')
             ->first();
 
-        // ↓ Store raw punch_out status BEFORE formatting
+        // Store raw punch_out status BEFORE formatting
         $isPunchedOut = $attendance && !is_null($attendance->punch_out);
 
         if ($attendance) {
@@ -74,11 +74,16 @@ class EmployeePortalApiController extends ApiController
         // 30-day attendance history
         $from = Carbon::now()->subDays(30)->startOfDay();
         $to = Carbon::now()->endOfDay();
+        $days_present = AttendanceLog::where('userid', $user->id)
+            ->whereMonth('log_date', date('m'))
+            ->count();
+
         $attendanceHistory = AttendanceLog::where('userid', $user->id)
             ->whereBetween('log_date', [$from, $to])
             ->select('log_date', 'punch_in', 'punch_out', 'punch_in_latitude', 'punch_in_longitude', 'punch_in_address', 'punch_out_latitude', 'punch_out_longitude', 'punch_out_address', 'working_hours')
             ->orderByDesc('log_date')
             ->get();
+
         if ($attendanceHistory) {
             $attendanceHistory->transform(function ($log) {
                 $tz = config('app.timezone', 'Asia/Kolkata');
@@ -201,19 +206,89 @@ class EmployeePortalApiController extends ApiController
             ->get()
             ->map(fn($task) => $this->formatTaskForEmployee($task, $employeeId));
 
+        // ── Leaves Today (for Team Lead & HR only) ─────────────────────
+        $userType = strtolower($user->type ?? '');
+        $roleName = strtolower($user->role?->name ?? '');
+        $designationName = strtolower($user->designation?->name ?? '');
+
+        $isHr = in_array($userType, ['hr', 'hr manager', 'hr_manager', 'admin'])
+            || str_contains($roleName, 'hr')
+            || str_contains($designationName, 'hr');
+
+        $isTeamLead = in_array($userType, ['team_lead', 'teamlead', 'team lead', 'tl'])
+            || str_contains($roleName, 'team lead')
+            || str_contains($roleName, 'lead')
+            || str_contains($designationName, 'team lead')
+            || str_contains($designationName, 'lead');
+
+        $leavesToday = [];
+        $leavesTodayByDepartment = [];
+
+        if ($isHr || $isTeamLead) {
+            $leavesTodayQuery = LeaveRequest::with([
+                'employee.user.department',
+                'employee.user.designation',
+                'leaveType'
+            ])
+                ->where('status', 'approved')
+                ->whereDate('start_date', '<=', $today)
+                ->whereDate('end_date', '>=', $today);
+
+            // Team Lead: filter to their own department only
+            if (!$isHr && $isTeamLead) {
+                $deptId = $user->department_id;
+                if ($deptId) {
+                    $leavesTodayQuery->whereHas('employee.user', function ($q) use ($deptId) {
+                        $q->where('department_id', $deptId);
+                    });
+                }
+            }
+
+            $mappedLeaves = $leavesTodayQuery->get()->map(function ($leave) {
+                $emp = $leave->employee;
+                $usr = $emp?->user;
+                $employeeName = $emp ? trim(($emp->first_name ?? '') . ' ' . ($emp->last_name ?? '')) : null;
+                if (empty($employeeName) && $usr) {
+                    $employeeName = $usr->username;
+                }
+                $deptName = $usr?->department?->name ?? 'Unassigned';
+
+                return [
+                    'id' => $leave->id,
+                    'employee_id' => $leave->employee_id,
+                    'employee_name' => $employeeName,
+                    'department_id' => $usr?->department_id,
+                    'department_name' => $deptName,
+                    'designation' => $usr?->designation?->name ?? null,
+                    'leave_type' => $leave->leaveType?->name ?? null,
+                    'start_date' => $leave->start_date ? (is_string($leave->start_date) ? $leave->start_date : $leave->start_date->format('Y-m-d')) : null,
+                    'end_date' => $leave->end_date ? (is_string($leave->end_date) ? $leave->end_date : $leave->end_date->format('Y-m-d')) : null,
+                    'duration_days' => $leave->duration_days,
+                    'reason' => $leave->reason,
+                    'status' => $leave->status,
+                    'session1' => $leave->session1,
+                    'session2' => $leave->session2,
+                ];
+            });
+
+            $leavesToday = $mappedLeaves->values()->toArray();
+            $leavesTodayByDepartment = $mappedLeaves->groupBy('department_name')->toArray();
+        }
+
         return $this->success([
             'employee' => $user->employee,
+            'days_present' => $days_present,
             'today_attendance' => [
                 'punched_in' => (bool) $attendance,
                 'punched_out' => $isPunchedOut,
                 'punch_in_time' => $attendance ? $attendance->punch_in : null,
                 'punch_out_time' => $attendance ? $attendance->punch_out : null,
-                'punch_in_location' => [          // ← ADD THIS
+                'punch_in_location' => [
                     'latitude' => $attendance ? $attendance->punch_in_latitude : null,
                     'longitude' => $attendance ? $attendance->punch_in_longitude : null,
                     'address' => $attendance ? $attendance->punch_in_address : null
                 ],
-                'punch_out_location' => [          // ← ADD THIS
+                'punch_out_location' => [
                     'latitude' => $attendance ? $attendance->punch_out_latitude : null,
                     'longitude' => $attendance ? $attendance->punch_out_longitude : null,
                     'address' => $attendance ? $attendance->punch_out_address : null
@@ -229,6 +304,11 @@ class EmployeePortalApiController extends ApiController
             'can_punch' => $canPunch,
             'pending_wfh_count' => WfhRequest::where('employee_id', $user->employee->id)->where('status', 'pending')->count(),
             'recent_leaves' => LeaveRequest::where('employee_id', $user->employee->id)->latest()->take(5)->get(),
+            'leaves_today' => $leavesToday,
+            'employees_leaves_today' => $leavesToday,
+            'leaves_today_by_department' => $leavesTodayByDepartment,
+            'is_hr' => $isHr,
+            'is_team_lead' => $isTeamLead,
             'tasks' => [
                 'today_assigned_tasks' => $todayAssignedTasks,
                 'all_tasks' => $allTasks,

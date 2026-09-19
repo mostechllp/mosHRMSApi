@@ -39,11 +39,11 @@ class DocumentExpiryNotification extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)
-                    ->subject('Document Expiry Warning: ' . $this->documentData['name'])
-                    ->line($this->documentData['message'])
-                    ->line('Expiry Date: ' . $this->documentData['expiry_date'])
-                    ->action('View Dashboard', url('/dashboard'))
-                    ->line('Please take necessary action.');
+            ->subject('Document Expiry Warning: ' . $this->documentData['name'])
+            ->line($this->documentData['message'])
+            ->line('Expiry Date: ' . $this->documentData['expiry_date'])
+            ->action('View Dashboard', url('/dashboard'))
+            ->line('Please take necessary action.');
     }
 
     /**

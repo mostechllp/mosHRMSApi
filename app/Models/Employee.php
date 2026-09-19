@@ -121,6 +121,18 @@ class Employee extends Model
         return $this->belongsTo(User::class);
     }
 
+    public function company()
+    {
+        return $this->hasOneThrough(
+            Company::class,
+            User::class,
+            'id',
+            'id',
+            'user_id',
+            'company_id'
+        );
+    }
+
     public function getAvatarUrlAttribute()
     {
         if ($this->avatar) {
@@ -143,6 +155,10 @@ class Employee extends Model
     {
         return $this->hasMany(LeaveAllocation::class);
     }
+    public function salaryPackages()
+    {
+        return $this->hasMany(EmployeeSalaryPackage::class);
+    }
 
     public function projects()
     {
@@ -162,6 +178,16 @@ class Employee extends Model
         return $this->hasMany(EmployeeBankDetail::class);
     }
 
+    public function verification()
+    {
+        return $this->hasOne(EmployeeVerification::class);
+    }
+
+    public function preOnboardingChecklist()
+    {
+        return $this->hasOne(EmployeePreOnboardingChecklist::class);
+    }
+
     public function reportingManager()
     {
         return $this->belongsTo(Employee::class, 'reporting_manager_id');
@@ -170,6 +196,11 @@ class Employee extends Model
     public function offboardings()
     {
         return $this->hasMany(Offboarding::class);
+    }
+
+    public function warnings()
+    {
+        return $this->hasMany(Warning::class);
     }
 
     public function tasks()

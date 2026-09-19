@@ -16,12 +16,12 @@ class TaskReportApiController extends ApiController
      */
     public function index(Request $request): JsonResponse
     {
-        $perPage    = $request->get('per_page', 15);
+        $perPage = $request->get('per_page', 15);
         $employeeId = $request->get('employee_id');
-        $date       = $request->get('date');
-        $fromDate   = $request->get('from_date');
-        $toDate     = $request->get('to_date');
-        $search     = $request->get('search');
+        $date = $request->get('date');
+        $fromDate = $request->get('from_date');
+        $toDate = $request->get('to_date');
+        $search = $request->get('search');
 
         $query = TaskReport::with(['user.employee']);
 
@@ -41,12 +41,12 @@ class TaskReportApiController extends ApiController
         if ($search) {
             $query->whereHas('user.employee', function ($q) use ($search) {
                 $q->where('first_name', 'like', "%{$search}%")
-                  ->orWhere('last_name', 'like', "%{$search}%")
-                  ->orWhere('employee_id', 'like', "%{$search}%");
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('employee_id', 'like', "%{$search}%");
             });
         }
 
-        $reports = $query->latest('date')->paginate($perPage);
+        $reports = $query->orderBy('date', 'desc')->paginate($perPage);
 
         return $this->success($reports);
     }
@@ -57,12 +57,12 @@ class TaskReportApiController extends ApiController
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'employee_id'     => 'required|exists:users,id',
-            'date'            => 'required|date',
+            'employee_id' => 'required|exists:users,id',
+            'date' => 'required|date',
             'tasks_completed' => 'required|string',
-            'plan_tomorrow'   => 'nullable|string',
-            'pending_tasks'   => 'nullable|string',
-            'remarks'         => 'nullable|string',
+            'plan_tomorrow' => 'nullable|string',
+            'pending_tasks' => 'nullable|string',
+            'remarks' => 'nullable|string',
         ]);
 
         $report = TaskReport::updateOrCreate(
@@ -92,15 +92,20 @@ class TaskReportApiController extends ApiController
     {
         $request->validate([
             'tasks_completed' => 'nullable|string',
-            'pending_tasks'   => 'nullable|string',
-            'plan_tomorrow'   => 'nullable|string',
-            'remarks'         => 'nullable|string',
-            'date'            => 'nullable|date',
-            'employee_id'     => 'nullable|exists:users,id',
+            'pending_tasks' => 'nullable|string',
+            'plan_tomorrow' => 'nullable|string',
+            'remarks' => 'nullable|string',
+            'date' => 'nullable|date',
+            'employee_id' => 'nullable|exists:users,id',
         ]);
 
         $taskReport->update($request->only([
-            'tasks_completed', 'pending_tasks', 'plan_tomorrow', 'remarks', 'date', 'employee_id',
+            'tasks_completed',
+            'pending_tasks',
+            'plan_tomorrow',
+            'remarks',
+            'date',
+            'employee_id',
         ]));
 
         return $this->success($taskReport->load('user.employee'), 'Task report updated successfully');

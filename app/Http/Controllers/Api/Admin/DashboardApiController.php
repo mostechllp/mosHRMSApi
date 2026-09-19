@@ -11,6 +11,7 @@ use App\Models\Party;
 use App\Models\Task;
 use App\Models\Project;
 use App\Models\Folder;
+use App\Models\LeaveRequest;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -116,6 +117,40 @@ class DashboardApiController extends ApiController
             $weeklyLabels[] = $date->format('D');
         }
 
+        $todayLeaves = LeaveRequest::with([
+            'employee.user.department',
+            'employee.user.designation',
+            'leaveType'
+        ])
+            ->where('status', 'approved')
+            ->whereDate('start_date', '<=', $today)
+            ->whereDate('end_date', '>=', $today)
+            ->get()
+            ->map(function ($leave) {
+                $employee = $leave->employee;
+                $user = $employee?->user;
+                $employeeName = $employee ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? '')) : null;
+                if (empty($employeeName) && $user) {
+                    $employeeName = $user->username;
+                }
+
+                return [
+                    'id' => $leave->id,
+                    'employee_id' => $leave->employee_id,
+                    'employee_name' => $employeeName,
+                    'department_name' => $user?->department?->name ?? null,
+                    'designation' => $user?->designation?->name ?? null,
+                    'leave_type' => $leave->leaveType?->name ?? null,
+                    'start_date' => $leave->start_date ? (is_string($leave->start_date) ? $leave->start_date : $leave->start_date->format('Y-m-d')) : null,
+                    'end_date' => $leave->end_date ? (is_string($leave->end_date) ? $leave->end_date : $leave->end_date->format('Y-m-d')) : null,
+                    'duration_days' => $leave->duration_days,
+                    'reason' => $leave->reason,
+                    'status' => $leave->status,
+                    'session1' => $leave->session1,
+                    'session2' => $leave->session2,
+                ];
+            });
+
         return $this->success([
             'stats' => [
                 'today' => $todayStats,
@@ -135,13 +170,16 @@ class DashboardApiController extends ApiController
                 'hr' => $hr,
                 'employees' => $employees,
                 'folders' => $folders,
+                'leaves_today' => $todayLeaves,
             ],
             'metadata' => [
                 'share_with' => $share_with,
                 'parties' => $parties,
             ],
             'tasks' => $tasks,
-            'projects' => $projects
+            'projects' => $projects,
+            'leaves_today' => $todayLeaves,
+            'employees_leaves_today' => $todayLeaves,
         ]);
     }
 
@@ -182,6 +220,11 @@ class DashboardApiController extends ApiController
 
         $absentCount = $activeEmployees - $punchedInCount;
 
+        $onLeaveCount = LeaveRequest::where('status', 'approved')
+            ->whereDate('start_date', '<=', $today)
+            ->whereDate('end_date', '>=', $today)
+            ->count();
+
         return $this->success([
             'employees' => [
                 'total' => $totalEmployees,
@@ -193,6 +236,7 @@ class DashboardApiController extends ApiController
                 'punched_out' => $punchedOutCount,
                 'late' => $lateCount,
                 'absent' => $absentCount > 0 ? $absentCount : 0,
+                'on_leave' => $onLeaveCount,
             ]
         ]);
     }
@@ -245,7 +289,37 @@ class DashboardApiController extends ApiController
     }
 
     /**
-     * Get user notifications.
+     * Whether the current user is an admin (sees all notifications).
+     */
+    private function isAdmin(): bool
+    {
+        $user = auth()->user();
+        return $user && strtolower($user->type ?? '') === 'admin';
+    }
+
+    /**
+     * Apply special_day filter on a notifications query/collection for non-admin users.
+     * Accepts an Eloquent builder or morph-many relationship.
+     */
+    private function applyNotificationFilter($query)
+    {
+        $user = auth()->user();
+        $userType = strtolower($user->type ?? '');
+
+        if ($userType === 'admin') {
+            return $query;
+        }
+
+        if ($userType === 'hr') {
+            return $query->whereIn('data->type', ['special_day', 'document', 'employee_document']);
+        }
+
+        return $query->where('data->type', 'special_day');
+    }
+
+    /**
+     * Get unread notifications.
+     * Admins see all; non-admins see only special_day.
      */
     public function getNotifications(): JsonResponse
     {
@@ -254,18 +328,69 @@ class DashboardApiController extends ApiController
             return $this->error('User not found', 401);
         }
 
-        $notifications = $user->unreadNotifications;
+        $notifications = $this->applyNotificationFilter(
+            $user->unreadNotifications()->getQuery()
+        )->latest()->get();
+
         return $this->success($notifications);
+    }
+
+    public function getReadNotifications(): JsonResponse
+    {
+        $user = auth()->user();
+
+        if (!$user) {
+            return $this->error('User not found', 401);
+        }
+
+        $notifications = $this->applyNotificationFilter(
+            $user->readNotifications()
+        )->latest()->get();
+
+        return $this->success($notifications);
+    }
+
+    public function getAllNotifications(): JsonResponse
+    {
+        $user = auth()->user();
+        if (!$user) {
+            return $this->error('User not found', 401);
+        }
+
+        $notifications = $this->applyNotificationFilter(
+            $user->notifications()
+        )->latest()->get();
+
+        return $this->success($notifications);
+    }
+
+    public function showNotification($id): JsonResponse
+    {
+        $user = auth()->user();
+
+        if (!$user) {
+            return $this->error('User not found', 401);
+        }
+
+        $query = $this->applyNotificationFilter($user->notifications());
+        $notification = $query->find($id);
+
+        if (!$notification) {
+            return $this->error('Notification not found', 404);
+        }
+
+        return $this->success($notification);
     }
 
     /**
      * Mark notification as read.
+     * Non-admin users can only mark their own special_day notifications as read.
      */
     public function markAsRead($id): JsonResponse
     {
-        $notification = auth()->user()
-            ->notifications()
-            ->find($id);
+        $user = auth()->user();
+        $query = $this->applyNotificationFilter($user->notifications());
+        $notification = $query->find($id);
 
         if ($notification) {
             $notification->markAsRead();
@@ -273,6 +398,17 @@ class DashboardApiController extends ApiController
         }
 
         return $this->error('Notification not found', 404);
+    }
+
+    public function markAllAsRead(): JsonResponse
+    {
+        $user = auth()->user();
+        $query = $this->applyNotificationFilter($user->notifications())
+            ->whereNull('read_at');
+
+        $query->update(['read_at' => now()]);
+
+        return $this->success(null, 'All notifications marked as read');
     }
 
     /**
@@ -313,12 +449,18 @@ class DashboardApiController extends ApiController
 
         $absentCount = $totalEmployees - $presentCount;
 
+        $onLeaveCount = LeaveRequest::where('status', 'approved')
+            ->whereDate('start_date', '<=', $date)
+            ->whereDate('end_date', '>=', $date)
+            ->count();
+
         return [
             'punched_in' => $punchedIn,
             'punched_out' => $punchedOut,
             'late' => $lateCount,
             'absent' => $absentCount > 0 ? $absentCount : 0,
-            'present' => $presentCount
+            'present' => $presentCount,
+            'on_leave' => $onLeaveCount
         ];
     }
 }

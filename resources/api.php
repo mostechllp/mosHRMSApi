@@ -135,6 +135,8 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
 
     // Projects
     Route::get('projects/eligible-managers', [ProjectApiController::class, 'getEligibleManagers']);
+    Route::get('projects/expiry-notifications', [ProjectApiController::class, 'getExpiryNotifications']);
+    Route::post('projects/send-expiry-notifications', [ProjectApiController::class, 'sendExpiryNotifications']);
     Route::apiResource('projects', ProjectApiController::class);
     Route::get('project-assignments', [ProjectAssignmentApiController::class, 'index']);
     Route::get('project-assignments/{id}', [ProjectAssignmentApiController::class, 'show']);

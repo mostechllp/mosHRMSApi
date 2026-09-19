@@ -41,6 +41,7 @@ use App\Http\Controllers\Api\Admin\AssetTypeApiController;
 use App\Http\Controllers\Api\Admin\AssetApiController;
 use App\Http\Controllers\Api\Admin\PayrollController;
 use App\Http\Controllers\Api\Admin\OffboardingChecklistCategoryController;
+use App\Http\Controllers\Api\Admin\WarningApiController;
 
 
 /*
@@ -85,8 +86,11 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::get('dashboard/summary', [DashboardApiController::class, 'getSummaryStats'])->middleware('permission:dashboard.read');
     Route::get('dashboard/charts', [DashboardApiController::class, 'getDetailedChartData'])->middleware('permission:dashboard.read');
     Route::get('notifications', [DashboardApiController::class, 'getNotifications'])->middleware('permission:dashboard.read');
+    Route::get('notifications/all', [DashboardApiController::class, 'getAllNotifications'])->middleware('permission:dashboard.read');
+    Route::get('notifications/read', [DashboardApiController::class, 'getReadNotifications'])->middleware('permission:dashboard.read');
+    Route::post('notifications/mark-all-as-read', [DashboardApiController::class, 'markAllAsRead'])->middleware('permission:dashboard.edit');
+    Route::get('notifications/{id}', [DashboardApiController::class, 'showNotification'])->middleware('permission:dashboard.read');
     Route::post('notifications/{id}/mark-as-read', [DashboardApiController::class, 'markAsRead'])->middleware('permission:dashboard.edit');
-
     // Employees
     Route::get('employees', [EmployeeApiController::class, 'index'])->middleware('permission:employees.read');
     Route::get('employees/{employee}', [EmployeeApiController::class, 'show'])->middleware('permission:employees.read');
@@ -97,11 +101,35 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::post('employees/upload-temp', [EmployeeApiController::class, 'uploadTemp']);
     Route::post('employees/{employee}/update-status', [EmployeeApiController::class, 'updateStatus'])->middleware('permission:employees.edit');
 
+    // Warning Messages
+    Route::group(['prefix' => 'warnings', 'middleware' => 'permission:employees.edit'], function () {
+        Route::get('/', [WarningApiController::class, 'index']);
+        Route::post('/', [WarningApiController::class, 'store']);
+        Route::get('/{id}', [WarningApiController::class, 'show']);
+        Route::put('/{id}', [WarningApiController::class, 'update']);
+        Route::delete('/{id}', [WarningApiController::class, 'destroy']);
+        Route::post('/{id}/send-email', [WarningApiController::class, 'sendEmail']);
+    });
+
     // Onboarding
-    Route::post('employees/onboard/details', [EmployeeOnboardingApiController::class, 'saveDetails'])->middleware('permission:employees.edit');
-    Route::post('employees/onboard/salary', [EmployeeOnboardingApiController::class, 'saveSalary'])->middleware('permission:employees.edit');
-    Route::post('employees/onboard/banks', [EmployeeOnboardingApiController::class, 'saveBanks'])->middleware('permission:employees.edit');
-    Route::post('employees/onboard/complete', [EmployeeOnboardingApiController::class, 'complete'])->middleware('permission:employees.edit');
+    Route::get('employees/onboard/details/{id?}', [EmployeeOnboardingApiController::class, 'getDetails'])->middleware('permission:employees.read');
+    Route::post('employees/onboard/details/{id?}', [EmployeeOnboardingApiController::class, 'saveDetails'])->middleware('permission:employees.edit');
+    Route::put('employees/onboard/details/{id?}', [EmployeeOnboardingApiController::class, 'updateDetails'])->middleware('permission:employees.edit');
+    Route::get('employees/onboard/verification/{id?}', [EmployeeOnboardingApiController::class, 'getVerification'])->middleware('permission:employees.read');
+    Route::post('employees/onboard/verification/{id?}', [EmployeeOnboardingApiController::class, 'saveVerification'])->middleware('permission:employees.edit');
+    Route::put('employees/onboard/verification/{id?}', [EmployeeOnboardingApiController::class, 'updateVerification'])->middleware('permission:employees.edit');
+    Route::post('employees/onboard/salary/{id?}', [EmployeeOnboardingApiController::class, 'saveSalary'])->middleware('permission:employees.edit');
+    Route::put('employees/onboard/salary/{id?}', [EmployeeOnboardingApiController::class, 'saveSalary'])->middleware('permission:employees.edit');
+    Route::get('employees/onboard/salary/{id?}', [EmployeeOnboardingApiController::class, 'getSalary'])->middleware('permission:employees.read');
+    Route::post('employees/onboard/banks/{id?}', [EmployeeOnboardingApiController::class, 'saveBanks'])->middleware('permission:employees.edit');
+    Route::put('employees/onboard/banks/{id?}', [EmployeeOnboardingApiController::class, 'saveBanks'])->middleware('permission:employees.edit');
+    Route::get('employees/onboard/banks/{id?}', [EmployeeOnboardingApiController::class, 'getBanks'])->middleware('permission:employees.read');
+    Route::get('employees/onboard/checklist/{id?}', [EmployeeOnboardingApiController::class, 'getChecklist'])->middleware('permission:employees.read');
+    Route::post('employees/onboard/checklist/{id?}', [EmployeeOnboardingApiController::class, 'saveChecklist'])->middleware('permission:employees.edit');
+    Route::put('employees/onboard/checklist/{id?}', [EmployeeOnboardingApiController::class, 'saveChecklist'])->middleware('permission:employees.edit');
+    Route::post('employees/onboard/complete/{id?}', [EmployeeOnboardingApiController::class, 'complete'])->middleware('permission:employees.edit');
+    Route::put('employees/onboard/complete/{id?}', [EmployeeOnboardingApiController::class, 'complete'])->middleware('permission:employees.edit');
+    Route::get('employees/onboard/progress/{id?}', [EmployeeOnboardingApiController::class, 'getProgress'])->middleware('permission:employees.read');
 
     // Employee Bank Details
     Route::put('bank-details/{id}', [EmployeeBankDetailApiController::class, 'update'])->middleware('permission:employees.edit');
@@ -149,6 +177,8 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     // Projects
     Route::get('projects/eligible-managers', [ProjectApiController::class, 'getEligibleManagers']);
     Route::get('projects/statuses', [ProjectApiController::class, 'getStatuses']);
+    Route::get('projects/expiry-notifications', [ProjectApiController::class, 'getExpiryNotifications']);
+    Route::post('projects/send-expiry-notifications', [ProjectApiController::class, 'sendExpiryNotifications']);
     Route::apiResource('projects', ProjectApiController::class);
     Route::get('project-assignments', [ProjectAssignmentApiController::class, 'index']);
     Route::get('project-assignments/{id}', [ProjectAssignmentApiController::class, 'show']);
@@ -246,17 +276,38 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
 
     // Offboarding Routes
     Route::group(['prefix' => 'offboarding'], function () {
-        Route::get('/', [OffboardingApiController::class, 'index']);
-        Route::post('/initiate', [OffboardingApiController::class, 'initiate']);
-        Route::get('/{id}', [OffboardingApiController::class, 'show']);
-        Route::get('/{id}/visa-status', [OffboardingApiController::class, 'getVisaStatus']);
-        Route::post('/{id}/visa-status/complete', [OffboardingApiController::class, 'completeVisaStatus']);
-        Route::post('/{id}/checklists', [OffboardingApiController::class, 'updateChecklist']);
-        Route::post('/{id}/assets', [OffboardingApiController::class, 'updateAssets']);
-        Route::post('/{id}/interview', [OffboardingApiController::class, 'submitInterview']);
-        Route::post('/{id}/settlement', [OffboardingApiController::class, 'updateSettlement']);
-        Route::post('/{id}/letters', [OffboardingApiController::class, 'generateLetters']);
-        Route::get('/{id}/progress', [OffboardingApiController::class, 'getProgress']);
+        Route::get('/', [OffboardingApiController::class, 'index'])->middleware('permission:offboarding.read');
+        Route::post('/initiate', [OffboardingApiController::class, 'initiate'])->middleware('permission:offboarding.edit');
+        Route::post('/save-handover', [OffboardingApiController::class, 'saveHandover'])->middleware('permission:offboarding.edit');
+        Route::get('/{id}/handover', [OffboardingApiController::class, 'getHandover'])->middleware('permission:offboarding.read');
+        Route::post('/{id}/handover', [OffboardingApiController::class, 'saveHandover'])->middleware('permission:offboarding.edit');
+        Route::post('/save-leave-verification', [OffboardingApiController::class, 'saveLeaveVerification'])->middleware('permission:offboarding.edit');
+        Route::get('/{id}/leave-verification', [OffboardingApiController::class, 'getLeaveVerification'])->middleware('permission:offboarding.read');
+        Route::post('/{id}/leave-verification', [OffboardingApiController::class, 'saveLeaveVerification'])->middleware('permission:offboarding.edit');
+        Route::post('/save-access-removal', [OffboardingApiController::class, 'saveAccessRemoval'])->middleware('permission:offboarding.edit');
+        Route::get('/{id}/access-removal', [OffboardingApiController::class, 'getAccessRemoval'])->middleware('permission:offboarding.read');
+        Route::post('/{id}/access-removal', [OffboardingApiController::class, 'saveAccessRemoval'])->middleware('permission:offboarding.edit');
+        Route::put('/update-initiate', [OffboardingApiController::class, 'initiate'])->middleware('permission:offboarding.edit');
+        Route::get('/reporting-managers', [OffboardingApiController::class, 'reportingManagers'])->middleware('permission:offboarding.read');
+        Route::get('/employees', [OffboardingApiController::class, 'getAllEmployees'])->middleware('permission:offboarding.read');
+        Route::get('/stats', [OffboardingApiController::class, 'getStats'])->middleware('permission:offboarding.read');
+        Route::get('/employees/salary-packages/{id}', [OffboardingApiController::class, 'getSalaryPackages'])->middleware('permission:offboarding.edit');
+        Route::get('/{id}/visa-status', [OffboardingApiController::class, 'getVisaStatus'])->middleware('permission:offboarding.read');
+        Route::post('/{id}/visa-status', [OffboardingApiController::class, 'updateVisaStatus'])->middleware('permission:offboarding.edit');
+        Route::post('/{id}/visa-status/complete', [OffboardingApiController::class, 'completeVisaStatus'])->middleware('permission:offboarding.edit');
+        Route::post('/{id}/checklists', [OffboardingApiController::class, 'updateChecklist'])->middleware('permission:offboarding.edit');
+        Route::post('/{id}/assets', [OffboardingApiController::class, 'updateAssets'])->middleware('permission:offboarding.edit');
+        Route::post('/{id}/interview', [OffboardingApiController::class, 'submitInterview'])->middleware('permission:offboarding.edit');
+        Route::get('/{id}/settlement', [OffboardingApiController::class, 'getSettlement'])->middleware('permission:offboarding.read');
+        Route::post('/{id}/settlement', [OffboardingApiController::class, 'updateSettlement'])->middleware('permission:offboarding.edit');
+        Route::post('/save-settlement', [OffboardingApiController::class, 'updateSettlement'])->middleware('permission:offboarding.edit');
+        Route::post('/{id}/letters', [OffboardingApiController::class, 'generateLetters'])->middleware('permission:offboarding.edit');
+        Route::post('/{id}/letters/upload', [OffboardingApiController::class, 'uploadLetter'])->middleware('permission:offboarding.edit');
+        Route::post('/{id}/letters/complete', [OffboardingApiController::class, 'updateLetters'])->middleware('permission:offboarding.edit');
+        Route::post('/{id}/complete', [OffboardingApiController::class, 'completeOffboarding'])->middleware('permission:offboarding.edit');
+        Route::get('/{id}/progress', [OffboardingApiController::class, 'getProgress'])->middleware('permission:offboarding.read');
+        Route::get('/{id}', [OffboardingApiController::class, 'show'])->middleware('permission:offboarding.read');
+        Route::delete('/{id}', [OffboardingApiController::class, 'destroy'])->middleware('permission:offboarding.delete');
     });
 
     //Checklists
