@@ -21,9 +21,11 @@ return new class extends Migration
             $table->string('title');
             $table->string('subject');
             $table->text('description');
+            $table->string('attachment_path')->nullable();
+            $table->string('attachment_name')->nullable();
 
             $table->string('status')->default('draft'); // 'draft', 'issued', 'sent'
-            
+
             $table->date('issued_date')->nullable();
 
             $table->foreignId('created_by')

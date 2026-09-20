@@ -13,6 +13,7 @@ return new class extends Migration
             $table->string('name');
             $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
             $table->foreignId('deleted_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('parent_id')->nullable()->after('id')->constrained('folders')->nullOnDelete();
             $table->timestamps();
             $table->softDeletes();
         });

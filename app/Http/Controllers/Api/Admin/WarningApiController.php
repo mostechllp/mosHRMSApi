@@ -9,6 +9,7 @@ use App\Mail\WarningNoticeMail;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use OpenApi\Attributes as OA;
 
 #[OA\Tag(
@@ -70,22 +71,31 @@ class WarningApiController extends ApiController
         path: '/api/admin/warnings',
         operationId: 'createWarning',
         summary: 'Create a new employee warning message',
-        description: 'Creates a warning for an employee. If send_email is true, immediately dispatches the warning email.',
+        description: 'Creates a warning for an employee, optionally with a letter attachment. If send_email is true, immediately dispatches the warning email.',
         security: [['bearerAuth' => []]],
         tags: ['Warnings']
     )]
     #[OA\RequestBody(
         required: true,
-        content: new OA\JsonContent(
-            required: ['employee_id', 'title', 'subject', 'description'],
-            properties: [
-                new OA\Property(property: 'employee_id', type: 'integer', example: 1),
-                new OA\Property(property: 'title', type: 'string', example: 'First Written Warning - Attendance'),
-                new OA\Property(property: 'subject', type: 'string', example: 'Notice of Unexcused Absences'),
-                new OA\Property(property: 'description', type: 'string', example: 'You have been absent for 3 consecutive days without prior notice.'),
-                new OA\Property(property: 'issued_date', type: 'string', format: 'date', example: '2026-09-16'),
-                new OA\Property(property: 'send_email', type: 'boolean', example: false),
-            ]
+        content: new OA\MediaType(
+            mediaType: 'multipart/form-data',
+            schema: new OA\Schema(
+                required: ['employee_id', 'title', 'subject', 'description'],
+                properties: [
+                    new OA\Property(property: 'employee_id', type: 'integer', example: 1),
+                    new OA\Property(property: 'title', type: 'string', example: 'First Written Warning - Attendance'),
+                    new OA\Property(property: 'subject', type: 'string', example: 'Notice of Unexcused Absences'),
+                    new OA\Property(property: 'description', type: 'string', example: 'You have been absent for 3 consecutive days without prior notice.'),
+                    new OA\Property(property: 'issued_date', type: 'string', format: 'date', example: '2026-09-16'),
+                    new OA\Property(property: 'send_email', type: 'boolean', example: false),
+                    new OA\Property(
+                        property: 'attachment',
+                        type: 'string',
+                        format: 'binary',
+                        description: 'Warning letter file (pdf, doc, docx, jpg, png — max 5MB)'
+                    ),
+                ]
+            )
         )
     )]
     #[OA\Response(response: 201, description: 'Warning created successfully')]
@@ -98,9 +108,19 @@ class WarningApiController extends ApiController
             'description' => 'required|string',
             'issued_date' => 'nullable|date',
             'send_email' => 'nullable|boolean',
+            'attachment' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:5120', // 5MB
         ]);
 
         $employee = Employee::findOrFail($validated['employee_id']);
+
+        $attachmentPath = null;
+        $attachmentName = null;
+
+        if ($request->hasFile('attachment')) {
+            $file = $request->file('attachment');
+            $attachmentName = $file->getClientOriginalName();
+            $attachmentPath = $file->store('warnings/attachments', 'public'); // switch disk to 's3' if needed
+        }
 
         $warning = Warning::create([
             'employee_id' => $employee->id,
@@ -108,11 +128,12 @@ class WarningApiController extends ApiController
             'subject' => $validated['subject'],
             'description' => $validated['description'],
             'issued_date' => $validated['issued_date'] ?? now()->toDateString(),
+            'attachment_path' => $attachmentPath,
+            'attachment_name' => $attachmentName,
             'created_by' => $request->user()?->id,
             'status' => 'issued',
         ]);
 
-        // If send_email is requested immediately
         if (!empty($validated['send_email'])) {
             $this->dispatchWarningEmail($warning);
         }
@@ -154,10 +175,35 @@ class WarningApiController extends ApiController
         path: '/api/admin/warnings/{id}',
         operationId: 'updateWarning',
         summary: 'Update an existing warning message',
+        description: 'Updates warning fields. Optionally replace the attachment (send remove_attachment=true to clear it without uploading a new one).',
         security: [['bearerAuth' => []]],
         tags: ['Warnings']
     )]
+    #[OA\RequestBody(
+        required: false,
+        content: new OA\MediaType(
+            mediaType: 'multipart/form-data',
+            schema: new OA\Schema(
+                properties: [
+                    new OA\Property(property: 'employee_id', type: 'integer', example: 1),
+                    new OA\Property(property: 'title', type: 'string'),
+                    new OA\Property(property: 'subject', type: 'string'),
+                    new OA\Property(property: 'description', type: 'string'),
+                    new OA\Property(property: 'issued_date', type: 'string', format: 'date'),
+                    new OA\Property(property: 'status', type: 'string'),
+                    new OA\Property(
+                        property: 'attachment',
+                        type: 'string',
+                        format: 'binary',
+                        description: 'New warning letter file — replaces the existing one if present'
+                    ),
+                    new OA\Property(property: 'remove_attachment', type: 'boolean', example: false),
+                ]
+            )
+        )
+    )]
     #[OA\Response(response: 200, description: 'Warning updated successfully')]
+    #[OA\Response(response: 404, description: 'Warning record not found')]
     public function update(Request $request, $id): JsonResponse
     {
         $warning = Warning::find($id);
@@ -173,9 +219,33 @@ class WarningApiController extends ApiController
             'description' => 'nullable|string',
             'issued_date' => 'nullable|date',
             'status' => 'nullable|string',
+            'attachment' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:5120',
+            'remove_attachment' => 'nullable|boolean',
         ]);
 
-        $warning->update(array_filter($validated, fn($val) => !is_null($val)));
+        $updateData = array_filter(
+            collect($validated)->except(['attachment', 'remove_attachment'])->all(),
+            fn ($val) => !is_null($val)
+        );
+
+        // Replace attachment with a newly uploaded file
+        if ($request->hasFile('attachment')) {
+            if ($warning->attachment_path) {
+                Storage::disk('public')->delete($warning->attachment_path);
+            }
+
+            $file = $request->file('attachment');
+            $updateData['attachment_name'] = $file->getClientOriginalName();
+            $updateData['attachment_path'] = $file->store('warnings/attachments', 'public');
+        }
+        // Or explicitly clear the existing attachment without uploading a new one
+        elseif ($request->boolean('remove_attachment') && $warning->attachment_path) {
+            Storage::disk('public')->delete($warning->attachment_path);
+            $updateData['attachment_path'] = null;
+            $updateData['attachment_name'] = null;
+        }
+
+        $warning->update($updateData);
 
         return $this->success(
             $warning->fresh(['employee.user', 'creator']),
@@ -202,9 +272,43 @@ class WarningApiController extends ApiController
             return $this->error('Warning record not found.', 404);
         }
 
+        if ($warning->attachment_path) {
+            Storage::disk('public')->delete($warning->attachment_path);
+        }
+
         $warning->delete();
 
         return $this->success(null, 'Warning message deleted successfully.');
+    }
+
+    /**
+     * Download the warning's attachment.
+     */
+    #[OA\Get(
+        path: '/api/admin/warnings/{id}/attachment',
+        operationId: 'downloadWarningAttachment',
+        summary: 'Download the warning letter attachment',
+        security: [['bearerAuth' => []]],
+        tags: ['Warnings']
+    )]
+    #[OA\Response(response: 200, description: 'Attachment file stream')]
+    #[OA\Response(response: 404, description: 'Warning or attachment not found')]
+    public function downloadAttachment($id)
+    {
+        $warning = Warning::find($id);
+
+        if (!$warning) {
+            return $this->error('Warning record not found.', 404);
+        }
+
+        if (!$warning->attachment_path || !Storage::disk('public')->exists($warning->attachment_path)) {
+            return $this->error('No attachment found for this warning.', 404);
+        }
+
+        return Storage::disk('public')->download(
+            $warning->attachment_path,
+            $warning->attachment_name ?? basename($warning->attachment_path)
+        );
     }
 
     /**

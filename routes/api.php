@@ -109,6 +109,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::put('/{id}', [WarningApiController::class, 'update']);
         Route::delete('/{id}', [WarningApiController::class, 'destroy']);
         Route::post('/{id}/send-email', [WarningApiController::class, 'sendEmail']);
+        Route::get('/{id}/attachment', [WarningApiController::class, 'downloadAttachment']);
     });
 
     // Onboarding

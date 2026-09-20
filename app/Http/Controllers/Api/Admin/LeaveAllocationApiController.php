@@ -67,9 +67,9 @@ class LeaveAllocationApiController extends ApiController
 
                     return [
                         'leave_type' => $leaveType->name,
-                        'allocated'  => $allocated,
-                        'used'       => $used,
-                        'balance'    => $allocated - $used,
+                        'allocated' => $allocated,
+                        'used' => $used,
+                        'balance' => $allocated - $used,
                     ];
                 })->values(),
             ];
@@ -89,10 +89,23 @@ class LeaveAllocationApiController extends ApiController
             ->get()
             ->keyBy('leave_type_id');
 
+        $used = LeaveRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->sum('duration_days');
+
+        $allocated = LeaveAllocation::where('employee_id', $employee->id)
+            ->where('year', date('Y'))
+            ->sum('allocated_days');
+
+        $balance = $allocated - $used;
+
         return $this->success([
             'employee' => $employee,
             'leave_types' => $leaveTypes,
-            'allocations' => $allocations
+            'allocations' => $allocations,
+            'balance' => $balance,
+            'used' => $used,
+            'allocated' => $allocated,
         ]);
     }
 

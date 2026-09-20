@@ -5,6 +5,7 @@ namespace App\Mail;
 use App\Models\Warning;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
+use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -54,6 +55,13 @@ class WarningNoticeMail extends Mailable
      */
     public function attachments(): array
     {
-        return [];
+        if (empty($this->warning->attachment_path)) {
+            return [];
+        }
+
+        return [
+            Attachment::fromStorageDisk('public', $this->warning->attachment_path)
+                ->as($this->warning->attachment_name ?? basename($this->warning->attachment_path)),
+        ];
     }
 }

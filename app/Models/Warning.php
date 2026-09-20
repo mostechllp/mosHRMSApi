@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 class Warning extends Model
 {
@@ -18,6 +19,8 @@ class Warning extends Model
         'description',
         'status',
         'issued_date',
+        'attachment_path',
+        'attachment_name',
         'created_by',
         'email_sent_at',
     ];
@@ -36,4 +39,13 @@ class Warning extends Model
     {
         return $this->belongsTo(User::class, 'created_by');
     }
+
+    public function getAttachmentUrlAttribute(): ?string
+    {
+        return $this->attachment_path
+            ? Storage::disk('public')->url($this->attachment_path)
+            : null;
+    }
+
+    protected $appends = ['attachment_url'];
 }
