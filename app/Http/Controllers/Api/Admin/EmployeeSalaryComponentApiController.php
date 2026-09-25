@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Models\EmployeeSalaryComponent;
-use App\Models\EmployeeSalaryPackage;
+use App\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
@@ -12,8 +12,19 @@ class EmployeeSalaryComponentApiController extends ApiController
 {
     public function getSalaryComponents($id): JsonResponse
     {
+        $employee = Employee::find($id);
+
+        if (!$employee) {
+            return $this->error('Employee not found', 404);
+        }
+
         $salaryComponents = EmployeeSalaryComponent::where('employee_id', $id)->get();
-        return $this->success($salaryComponents, 'Salary components fetched successfully');
+
+        return $this->success([
+            'currency' => $employee->currency,
+            'payment_cycle' => $employee->payment_cycle,
+            'salary_components' => $salaryComponents,
+        ], 'Salary components fetched successfully');
     }
 
     public function store(Request $request): JsonResponse

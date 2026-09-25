@@ -724,9 +724,8 @@ class EmployeePortalApiController extends ApiController
             $employee = $user ? $user->employee : null;
         }
 
-        if (!$employee) {
+        if (!$employee)
             return $this->error('Employee profile not found', 404);
-        }
 
         // Check if there are overlapping leaves
         $hasOverlap = LeaveRequest::where('employee_id', $employee->id)
@@ -744,23 +743,11 @@ class EmployeePortalApiController extends ApiController
         $leaveType = LeaveType::find($request->leave_type_id);
 
         // Check for sick leave document
-        if ($leaveType && str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document')) {
+        if (str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document')) {
             return $this->error('Medical certificate is required for sick leave', 422);
         }
 
-        // Find or prepare LOP Leave Type
-        $lopLeaveType = LeaveType::where(function ($q) {
-            $q->where('name', 'LIKE', '%LOP%')
-                ->orWhere('name', 'LIKE', '%Loss of Pay%')
-                ->orWhere('name', 'LIKE', '%Unpaid%');
-        })->first();
-
-        if (!$lopLeaveType) {
-            $lopLeaveType = LeaveType::create([
-                'name' => 'LOP',
-                'status' => true,
-            ]);
-        }
+        
 
         $start = Carbon::parse($request->start_date);
         $end = Carbon::parse($request->end_date);
@@ -770,73 +757,30 @@ class EmployeePortalApiController extends ApiController
         $durationDays = 0.0;
         $currentDate = $start->copy();
 
-        if ($start->isSameDay($end)) {
+        while ($currentDate->lte($end)) {
             if ($currentDate->isSunday()) {
-                $durationDays = 0.0;
-            } elseif (empty($session1) && empty($session2)) {
-                $durationDays = 1.0;
-            } elseif ($session1 === 'morning' && $session2 === 'afternoon') {
-                $durationDays = 1.0;
-            } else {
-                $durationDays = 0.5;
-            }
-        } else {
-            while ($currentDate->lte($end)) {
-                if ($currentDate->isSunday()) {
-                    $currentDate->addDay();
-                    continue;
-                }
-
-                if ($currentDate->isSameDay($start)) {
-                    if (empty($session1) || $session1 === 'morning') {
-                        $durationDays += 1.0;
-                    } else {
-                        $durationDays += 0.5;
-                    }
-                } elseif ($currentDate->isSameDay($end)) {
-                    if (empty($session2) || $session2 === 'afternoon') {
-                        $durationDays += 1.0;
-                    } else {
-                        $durationDays += 0.5;
-                    }
-                } else {
-                    $durationDays += 1.0;
-                }
-
                 $currentDate->addDay();
+                continue;
             }
+
+            if ($currentDate->isSameDay($start) && $currentDate->isSameDay($end)) {
+                if ($session1 === 'morning' && $session2 === 'afternoon') {
+                    $durationDays += 1.0;
+                } else {
+                    $durationDays += 0.5;
+                }
+            } elseif ($currentDate->isSameDay($start)) {
+                $durationDays += ($session1 === 'morning') ? 1.0 : 0.5;
+            } elseif ($currentDate->isSameDay($end)) {
+                $durationDays += ($session2 === 'afternoon') ? 1.0 : 0.5;
+            } else {
+                $durationDays += 1.0;
+            }
+
+            $currentDate->addDay();
         }
 
-        if ($durationDays <= 0) {
-            return $this->error('Selected leave duration invalid or falls entirely on non-working days.', 422);
-        }
-
-        $documentPath = null;
-        if ($request->hasFile('document')) {
-            $documentPath = $request->file('document')->store('leaves/documents', 'public');
-        }
-
-        $isLop = ($leaveType && ($leaveType->id == $lopLeaveType->id || preg_match('/(lop|loss of pay|unpaid)/i', $leaveType->name)));
-
-        if ($isLop) {
-            $leave = LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $leaveType->id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $durationDays,
-                'claim_salary' => false,
-                'document' => $documentPath,
-                'reason' => $request->reason,
-                'status' => 'pending',
-            ]);
-
-            return $this->success($leave, 'LOP leave request submitted successfully', 201);
-        }
-
-        // Non-LOP category leave balance check
+        // Balance check
         $currentYear = date('Y');
         $allocation = LeaveAllocation::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
@@ -845,54 +789,21 @@ class EmployeePortalApiController extends ApiController
 
         $allocated = $allocation ? (float) $allocation->allocated_days : 0;
 
-        $leavesTaken = (float) LeaveRequest::where('employee_id', $employee->id)
+        $leavesTaken = LeaveRequest::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
             ->where('status', 'approved')
             ->whereYear('start_date', $currentYear)
             ->sum('duration_days');
 
-        $remainingBalance = max(0, $allocated - $leavesTaken);
-
-        if ($remainingBalance == 0) {
-            return $this->error("You have 0 days remaining for {$leaveType->name}. Please apply as LOP.", 422);
-        }
+        $remainingBalance = $allocated - $leavesTaken;
 
         if ($durationDays > $remainingBalance) {
-            $bucketDays = $remainingBalance;
-            $lopDays = $durationDays - $remainingBalance;
+            return $this->error("Insufficient leave balance. You have only $remainingBalance days remaining.", 422);
+        }
 
-            $bucketLeave = LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $request->leave_type_id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $bucketDays,
-                'claim_salary' => $request->claim_salary ?? false,
-                'document' => $documentPath,
-                'reason' => $request->reason,
-                'status' => 'pending',
-            ]);
-
-            $lopLeave = LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $lopLeaveType->id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $lopDays,
-                'claim_salary' => false,
-                'document' => $documentPath,
-                'reason' => $request->reason . ' (Auto-split LOP)',
-                'status' => 'pending',
-            ]);
-
-            return $this->success([
-                'leave' => $bucketLeave,
-                'lop_leave' => $lopLeave,
-            ], "Leave request submitted successfully. {$bucketDays} day(s) deducted from {$leaveType->name} and {$lopDays} day(s) created under LOP.", 201);
+        $documentPath = null;
+        if ($request->hasFile('document')) {
+            $documentPath = $request->file('document')->store('leaves/documents', 'public');
         }
 
         $leave = LeaveRequest::create([
@@ -942,25 +853,9 @@ class EmployeePortalApiController extends ApiController
             return $this->error('Leave request not found', 404);
         }
 
-        $leaveType = LeaveType::find($request->leave_type_id);
-
-        if ($leaveType && str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document') && !$leave->document) {
-            return $this->error('Medical certificate is required for sick leave', 422);
-        }
-
-        // Find or prepare LOP Leave Type
-        $lopLeaveType = LeaveType::where(function ($q) {
-            $q->where('name', 'LIKE', '%LOP%')
-                ->orWhere('name', 'LIKE', '%Loss of Pay%')
-                ->orWhere('name', 'LIKE', '%Unpaid%');
-        })->first();
-
-        if (!$lopLeaveType) {
-            $lopLeaveType = LeaveType::create([
-                'name' => 'LOP',
-                'status' => true,
-            ]);
-        }
+        // if ($leave->status !== 'pending') {
+        //     return $this->error('Only pending leave requests can be updated.', 400);
+        // }
 
         // Check if there are overlapping leaves (excluding this leave request)
         $hasOverlap = LeaveRequest::where('employee_id', $employee->id)
@@ -976,6 +871,12 @@ class EmployeePortalApiController extends ApiController
             return $this->error('You have already applied/taken leave on the selected date(s).', 422);
         }
 
+        $leaveType = LeaveType::find($request->leave_type_id);
+
+        if (str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document') && !$leave->document) {
+            return $this->error('Medical certificate is required for sick leave', 422);
+        }
+
         $start = Carbon::parse($request->start_date);
         $end = Carbon::parse($request->end_date);
         $session1 = $request->session1;
@@ -984,71 +885,29 @@ class EmployeePortalApiController extends ApiController
         $durationDays = 0.0;
         $currentDate = $start->copy();
 
-        if ($start->isSameDay($end)) {
+        while ($currentDate->lte($end)) {
             if ($currentDate->isSunday()) {
-                $durationDays = 0.0;
-            } elseif (empty($session1) && empty($session2)) {
-                $durationDays = 1.0;
-            } elseif ($session1 === 'morning' && $session2 === 'afternoon') {
-                $durationDays = 1.0;
-            } else {
-                $durationDays = 0.5;
-            }
-        } else {
-            while ($currentDate->lte($end)) {
-                if ($currentDate->isSunday()) {
-                    $currentDate->addDay();
-                    continue;
-                }
-
-                if ($currentDate->isSameDay($start)) {
-                    if (empty($session1) || $session1 === 'morning') {
-                        $durationDays += 1.0;
-                    } else {
-                        $durationDays += 0.5;
-                    }
-                } elseif ($currentDate->isSameDay($end)) {
-                    if (empty($session2) || $session2 === 'afternoon') {
-                        $durationDays += 1.0;
-                    } else {
-                        $durationDays += 0.5;
-                    }
-                } else {
-                    $durationDays += 1.0;
-                }
-
                 $currentDate->addDay();
+                continue;
             }
+
+            if ($currentDate->isSameDay($start) && $currentDate->isSameDay($end)) {
+                if ($session1 === 'morning' && $session2 === 'afternoon') {
+                    $durationDays += 1.0;
+                } else {
+                    $durationDays += 0.5;
+                }
+            } elseif ($currentDate->isSameDay($start)) {
+                $durationDays += ($session1 === 'morning') ? 1.0 : 0.5;
+            } elseif ($currentDate->isSameDay($end)) {
+                $durationDays += ($session2 === 'afternoon') ? 1.0 : 0.5;
+            } else {
+                $durationDays += 1.0;
+            }
+
+            $currentDate->addDay();
         }
 
-        if ($durationDays <= 0) {
-            return $this->error('Selected leave duration invalid or falls entirely on non-working days.', 422);
-        }
-
-        $documentPath = $leave->document;
-        if ($request->hasFile('document')) {
-            $documentPath = $request->file('document')->store('leaves/documents', 'public');
-        }
-
-        $isLop = ($leaveType && ($leaveType->id == $lopLeaveType->id || preg_match('/(lop|loss of pay|unpaid)/i', $leaveType->name)));
-
-        if ($isLop) {
-            $leave->update([
-                'leave_type_id' => $leaveType->id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $durationDays,
-                'claim_salary' => false,
-                'document' => $documentPath,
-                'reason' => $request->reason,
-            ]);
-
-            return $this->success($leave, 'LOP leave request updated successfully');
-        }
-
-        // Non-LOP category leave balance check
         $currentYear = date('Y');
         $allocation = LeaveAllocation::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
@@ -1057,53 +916,21 @@ class EmployeePortalApiController extends ApiController
 
         $allocated = $allocation ? (float) $allocation->allocated_days : 0;
 
-        $leavesTaken = (float) LeaveRequest::where('employee_id', $employee->id)
+        $leavesTaken = LeaveRequest::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
             ->where('status', 'approved')
-            ->where('id', '!=', $leave->id)
             ->whereYear('start_date', $currentYear)
             ->sum('duration_days');
 
-        $remainingBalance = max(0, $allocated - $leavesTaken);
-
-        if ($remainingBalance <= 0) {
-            return $this->error("You have 0 days remaining for {$leaveType->name}. Please apply as LOP.", 422);
-        }
+        $remainingBalance = $allocated - $leavesTaken;
 
         if ($durationDays > $remainingBalance) {
-            $bucketDays = $remainingBalance;
-            $lopDays = $durationDays - $remainingBalance;
+            return $this->error("Insufficient leave balance. You have only $remainingBalance days remaining.", 422);
+        }
 
-            $leave->update([
-                'leave_type_id' => $request->leave_type_id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $bucketDays,
-                'claim_salary' => $request->claim_salary ?? false,
-                'document' => $documentPath,
-                'reason' => $request->reason,
-            ]);
-
-            $lopLeave = LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $lopLeaveType->id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $lopDays,
-                'claim_salary' => false,
-                'document' => $documentPath,
-                'reason' => $request->reason . ' (Auto-split LOP)',
-                'status' => 'pending',
-            ]);
-
-            return $this->success([
-                'leave' => $leave,
-                'lop_leave' => $lopLeave,
-            ], "Leave request updated successfully. {$bucketDays} day(s) allocated to {$leaveType->name} and {$lopDays} day(s) created under LOP.");
+        $documentPath = $leave->document;
+        if ($request->hasFile('document')) {
+            $documentPath = $request->file('document')->store('leaves/documents', 'public');
         }
 
         $leave->update([

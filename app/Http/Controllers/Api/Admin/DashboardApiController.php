@@ -310,8 +310,8 @@ class DashboardApiController extends ApiController
             return $query;
         }
 
-        if ($userType === 'hr') {
-            return $query->whereIn('data->type', ['special_day', 'document', 'employee_document']);
+        if ($userType === 'hr' || $userType === 'admin') {
+            return $query->whereIn('data->type', ['special_day', 'document', 'employee_document', 'domain_expiry', 'project_email_expiry']);
         }
 
         return $query->where('data->type', 'special_day');

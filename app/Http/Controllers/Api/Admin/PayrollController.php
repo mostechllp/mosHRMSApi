@@ -2030,13 +2030,13 @@ class PayrollController extends Controller
         $startDate = $monthDate->copy()->startOfMonth()->toDateString();
         $endDate = $monthDate->copy()->endOfMonth()->toDateString();
 
-        // ------------------------------------------------------------------
         // 1. Attendance logs for the month
-        // ------------------------------------------------------------------
         $attendanceLogs = AttendanceLog::where('userid', $employee->user_id)
             ->whereBetween('log_date', [$startDate, $endDate])
             ->where('log_status', 'out')
             ->get();
+
+        $workedDays = $attendanceLogs->count();
 
         if ($attendanceLogs->isEmpty()) {
             return [
@@ -2045,138 +2045,57 @@ class PayrollController extends Controller
             ];
         }
 
-        // ------------------------------------------------------------------
-        // 2. Working days in the month (Mon–Sat, same as existing logic)
-        // ------------------------------------------------------------------
-        $workingDays = $monthDate->copy()
-            ->startOfMonth()
-            ->diffInWeekdays($monthDate->copy()->endOfMonth()) + 1;
+        // 2. Working days in the month
+        $workingDays = max(
+            1,
+            $monthDate->copy()->startOfMonth()
+                ->diffInWeekdays($monthDate->copy()->endOfMonth()) + 1
+        );
 
-        $workingDays = max(1, $workingDays); // guard against division by zero
+        // 3. Salary components
+        $salaryComponents = EmployeeSalaryComponent::where('employee_id', $employee->id)->get();
 
-        // ------------------------------------------------------------------
-        // 3. Salary packages
-        // ------------------------------------------------------------------
-        $salaryPackages = EmployeeSalaryPackage::where('employee_id', $employee->id)
-            ->with('salaryComponents')
-            ->get();
-
-        if ($salaryPackages->isEmpty()) {
+        if ($salaryComponents->isEmpty()) {
             return [
                 'success' => false,
-                'skip_reason' => 'No salary packages found',
+                'skip_reason' => 'No salary components found',
             ];
         }
 
-        // Separate AED (Dubai) vs home-currency packages
-        $dubaiPackage = null;
-        $homePackage = null;
+        $componentsData = [];
+        $subtotal = 0.0;
 
-        foreach ($salaryPackages as $pkg) {
-            if (strtoupper($pkg->currency) === 'AED') {
-                $dubaiPackage = $pkg;
-            } else {
-                $homePackage = $pkg;
-            }
-        }
+        foreach ($salaryComponents as $component) {
+            $dailyAmount = (float) $component->value / $workingDays;
+            $amount = round($dailyAmount * $workedDays, 2);
 
-        // ------------------------------------------------------------------
-        // 4. Group attendance by work_location and compute earnings per location
-        //    (mirrors the logic in calculateMonthlySalary)
-        // ------------------------------------------------------------------
-        $uaeKeywords = [
-            'united arab emirates',
-            'uae',
-            'dubai',
-            'abu dhabi',
-            'sharjah',
-            'ajman',
-            'fujairah',
-            'ras al khaimah',
-            'umm al quwain',
-            'rak',
-            'al ain',
-        ];
-
-        $grouped = $attendanceLogs->groupBy(fn($log) => $log->work_location ?: 'Unknown');
-        $locationBreakdown = [];
-        $totalEarnings = 0.0;
-        $primaryCurrency = $dubaiPackage ? 'AED' : ($homePackage?->currency ?? 'AED');
-
-        foreach ($grouped as $locationName => $logs) {
-            $workedDays = $logs->count();
-            $locLower = strtolower($locationName);
-
-            $isUae = false;
-            foreach ($uaeKeywords as $kw) {
-                if (str_contains($locLower, $kw)) {
-                    $isUae = true;
-                    break;
-                }
-            }
-
-            $selectedPackage = $isUae ? $dubaiPackage : $homePackage;
-
-            if (!$selectedPackage) {
-                continue; // no matching package for this location – skip
-            }
-
-            $componentsData = [];
-            $subtotal = 0.0;
-
-            foreach ($selectedPackage->salaryComponents as $component) {
-                $dailyAmount = (float) $component->value / $workingDays;
-                $amount = round($dailyAmount * $workedDays, 2);
-
-                $componentsData[] = [
-                    'id' => $component->id,
-                    'name' => $component->component_name,
-                    'amount' => $amount,
-                ];
-
-                $subtotal += $amount;
-            }
-
-            $pkgDetails = $selectedPackage->toArray();
-            unset($pkgDetails['salary_components']);
-
-            $locationBreakdown[] = [
-                'location_name' => $locationName,
-                'package' => $pkgDetails,
-                'worked_days' => $workedDays,
-                'currency' => [
-                    'code' => $selectedPackage->currency,
-                    'symbol' => $selectedPackage->currency,
-                ],
-                'salary_components' => $componentsData,
-                'subtotal' => round($subtotal, 2),
+            $componentsData[] = [
+                'id' => $component->id,
+                'name' => $component->component_name,
+                'amount' => $amount,
             ];
 
-            // Track the currency that earned the most for the payroll header
-            if ($subtotal > 0) {
-                $primaryCurrency = $selectedPackage->currency;
-            }
-
-            $totalEarnings += $subtotal;
+            $subtotal += $amount;
         }
 
-        // If everything was skipped (no matching packages for any location)
-        if (empty($locationBreakdown)) {
-            return [
-                'success' => false,
-                'skip_reason' => 'No matching salary package for any worked location',
-            ];
-        }
-
-        // ------------------------------------------------------------------
-        // 5. Final figures
-        // ------------------------------------------------------------------
-        $grossSalary = round($totalEarnings, 2);
+        // 4. Final figures
+        $grossSalary = round($subtotal, 2);
         $totalDeductions = 0.0;
         $overtime = 0.0;
         $netPay = round($grossSalary + $overtime - $totalDeductions, 2);
 
-        $employeeName = trim($employee->first_name . ' ' . $employee->last_name);
+        $locationBreakdown = [
+            [
+                'location_name' => 'Default',
+                'worked_days' => $workedDays,
+                'currency' => [
+                    'code' => $employee->currency ?? 'INR',
+                    'symbol' => $employee->currency ?? 'INR',
+                ],
+                'salary_components' => $componentsData,
+                'subtotal' => round($grossSalary, 2),
+            ]
+        ];
 
         $dataBlob = [
             'step_1' => [
@@ -2187,13 +2106,13 @@ class PayrollController extends Controller
                 'payment_date' => $monthDate->copy()->addMonth()->day(5)->format('Y-m-d'),
                 'payment_mode' => 'Bank Transfer',
                 'total_working_days' => $workingDays,
-                'days_present' => $attendanceLogs->count(),
+                'days_present' => $workedDays,
             ],
             'step_2' => [
                 'pay_period_month' => (int) $monthDate->format('m'),
                 'pay_period_year' => (int) $monthDate->format('Y'),
-                'package_ids' => array_values(array_filter([$dubaiPackage?->id, $homePackage?->id])),
                 'location_breakdown' => $locationBreakdown,
+                'salary_components' => $componentsData,
                 'total_earnings' => $grossSalary,
                 'total_deductions' => 0.0,
                 'gross_salary' => $grossSalary,
@@ -2220,7 +2139,7 @@ class PayrollController extends Controller
             'net_pay' => $netPay,
             'overtime' => $overtime,
             'deductions' => $totalDeductions,
-            'currency' => $primaryCurrency,
+            'currency' => $employee->currency ?? 'INR',
             'data' => $dataBlob,
         ];
     }

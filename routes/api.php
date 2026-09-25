@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\Admin\FileApiController;
 use App\Http\Controllers\Api\Admin\RoleApiController;
 use App\Http\Controllers\Api\Admin\ModuleApiController;
 use App\Http\Controllers\Api\Admin\UserApiController;
+use App\Http\Controllers\Api\Admin\LeavePolicyController;
 use App\Http\Controllers\Api\Admin\ProjectApiController;
 use App\Http\Controllers\Api\Admin\ProjectAssignmentApiController;
 use App\Http\Controllers\Api\Admin\EmployeeBankDetailApiController;
@@ -217,8 +218,16 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::post('wfh-requests/{wfhRequest}/status', [WfhApiController::class, 'updateStatus'])->middleware('permission:leaves.edit');
 
     // Leave Types (Admin side)
-    Route::apiResource('leave-types', LeaveTypeApiController::class)->middleware('permission:settings.read');
-    Route::post('leave-types/{leaveType}/status', [LeaveTypeApiController::class, 'updateStatus'])->middleware('permission:settings.edit');
+    Route::apiResource('leave-types', LeaveTypeApiController::class)->middleware('permission:leaves.read');
+    Route::get('get-active-leave-types', [LeaveTypeApiController::class, 'getLeaveTypes'])->middleware('permission:leaves.read');
+    Route::post('leave-types/{leaveType}/status', [LeaveTypeApiController::class, 'updateStatus'])->middleware('permission:leaves.edit');
+
+    // Leave policy
+    Route::get('/leave-policies',[LeavePolicyController::class, 'index'])->middleware('permission:leaves.read');
+    Route::post('/leave-policies',[LeavePolicyController::class, 'store'])->middleware('permission:leaves.edit');
+    Route::get('/leave-policies/{id}',[LeavePolicyController::class, 'show'])->middleware('permission:leaves.read');
+    Route::put('/leave-policies/{id}',[LeavePolicyController::class, 'update'])->middleware('permission:leaves.edit');
+    Route::delete('/leave-policies/{id}',[LeavePolicyController::class, 'destroy'])->middleware('permission:leaves.delete');
 
     // Working Hours
     Route::get('working-hours', [WorkingHourApiController::class, 'index'])->middleware('permission:settings.read');
@@ -360,6 +369,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'employee'], function () {
     Route::put('leaves/{leave}', [EmployeePortalApiController::class, 'updateLeave']);
     Route::delete('leaves/{leave}', [EmployeePortalApiController::class, 'destroyLeave']);
     Route::get('leave-types', [LeaveTypeApiController::class, 'index']);
+    Route::get('get-active-leave-types', [LeaveTypeApiController::class, 'getLeaveTypes']);
     Route::get('leave-allocations/{employee}', [LeaveAllocationApiController::class, 'show']);
 
     // Task Reports

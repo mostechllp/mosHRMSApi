@@ -145,7 +145,7 @@ class ReportApiController extends ApiController
                 if ($punchIn && $punchOut) {
 
                     $workedMinutes = Carbon::parse($punchIn)
-                        ->diffInMinutes(Carbon::parse($punchOut));        
+                        ->diffInMinutes(Carbon::parse($punchOut));
 
                     // Sum all break minutes for the day
                     $breakMinutes = $logs->sum(function ($log) {
@@ -186,6 +186,9 @@ class ReportApiController extends ApiController
                         : '-',
                     'worked_hours' => $workedHours,
                     'standard_hours' => $standardHours,
+                    'breaks' => $logs->flatMap(function ($log) {
+                        return $log->breaks;
+                    })->values(),
                     'overtime' => $this->formatOvertimeMinutes($overtimeMinutes),
                     'is_overtime' => $logs->contains('is_overtime', 1) ? 'Yes' : 'No',
                     'status' => $status,
@@ -500,7 +503,8 @@ class ReportApiController extends ApiController
         $workingHours = WorkingHour::all()
             ->keyBy(fn($item) => strtolower($item->day));
 
-        $allLogs = AttendanceLog::whereBetween('log_date', [$startDate, $endDate])
+        $allLogs = AttendanceLog::with('breaks')
+            ->whereBetween('log_date', [$startDate, $endDate])
             ->whereIn('userid', $userIds)
             ->orderBy('log_date')
             ->get()
@@ -547,17 +551,32 @@ class ReportApiController extends ApiController
                 $workedHours = 0;
                 $overtimeMinutes = 0;
 
+                // Total break minutes
+                $breakMinutes = $logs->sum(function ($log) {
+                    return $log->breaks->sum('duration_minutes');
+                });
+
+                // Detailed break log
+                $breakLogEntries = [];
+                foreach ($logs as $log) {
+                    foreach ($log->breaks as $break) {
+                        $startTime = $break->start_time ? Carbon::parse($break->start_time)->format('h:i A') : '-';
+                        $endTime = $break->end_time ? Carbon::parse($break->end_time)->format('h:i A') : 'Ongoing';
+                        $duration = $this->formatWorkedHours(($break->duration_minutes ?? 0) / 60);
+                        if ($duration === '--') {
+                            $duration = '0 mins';
+                        }
+                        $breakLogEntries[] = "{$startTime} - {$endTime} ({$duration})";
+                    }
+                }
+                $breakLog = !empty($breakLogEntries) ? implode(', ', $breakLogEntries) : '-';
+
                 $status = $punchIn ? 'Present' : 'Absent';
 
                 if ($punchIn && $punchOut) {
 
                     $workedMinutes = Carbon::parse($punchIn)
                         ->diffInMinutes(Carbon::parse($punchOut));
-
-                    // Total break minutes
-                    $breakMinutes = $logs->sum(function ($log) {
-                        return $log->breaks->sum('duration_minutes');
-                    });
 
                     // Deduct break duration
                     $workedMinutes = max(0, $workedMinutes - $breakMinutes);
@@ -588,6 +607,8 @@ class ReportApiController extends ApiController
                     $punchIn ? Carbon::parse($punchIn)->format('h:i A') : '-',
                     $punchOut ? Carbon::parse($punchOut)->format('h:i A') : '-',
                     $this->formatWorkedHours($workedHours),
+                    $this->formatWorkedHours($breakMinutes / 60),
+                    $breakLog,
                     $standardHours,
                     $this->formatOvertimeMinutes($overtimeMinutes),
                     $status,

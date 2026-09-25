@@ -17,4 +17,14 @@ class LeaveType extends Model
     {
         return $this->hasMany(LeaveAllocation::class);
     }
+
+    public function policy()
+    {
+        return $this->hasOne(LeavePolicy::class);
+    }
+
+    public function accruals()
+    {
+        return $this->hasMany(LeaveAccrual::class);
+    }
 }

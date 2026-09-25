@@ -32,6 +32,7 @@ class LeaveAllocationApiController extends ApiController
         $employees = Employee::with('user')
             ->whereHas('user', function ($query) {
                 $query->where('type', '!=', 'admin');
+                $query->where('status', 'active');
             })
             ->get();
 
@@ -55,7 +56,9 @@ class LeaveAllocationApiController extends ApiController
             $employeeAllocated = $allocatedLeaves->get($employee->id, collect());
 
             return [
+                'id' => $employee->id,
                 'employee_name' => $employee->first_name . ' ' . $employee->last_name ?? null,
+                'avatar' => $employee->avatar,
                 'leave_types' => $leaveTypes->map(function ($leaveType) use ($employeeUsed, $employeeAllocated) {
                     $used = (float) (optional(
                         $employeeUsed->firstWhere('leave_type_id', $leaveType->id)
@@ -97,7 +100,7 @@ class LeaveAllocationApiController extends ApiController
             ->where('year', date('Y'))
             ->sum('allocated_days');
 
-        $balance = $allocated - $used;
+        $balance = max(0, $allocated - $used);
 
         return $this->success([
             'employee' => $employee,

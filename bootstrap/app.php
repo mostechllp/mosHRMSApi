@@ -5,6 +5,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\PermissionMiddleware;
 use App\Http\Middleware\EnsureEmployeeAuthenticated;
+use Carbon\CarbonInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -20,18 +21,26 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule) {
-        $schedule->command('documents:check-expiry')->daily();
-        $schedule->command('hr:check-probation-contract')->daily();
-        $schedule->command('hr:check-special-days')->dailyAt('08:00');
+        // $schedule->command('documents:check-expiry')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+        // $schedule->command('hr:check-probation-contract')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+        // $schedule->command('hr:check-special-days')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+        // $schedule->command('projects:notify-domain-expiries')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+        // $schedule->command('leave:accrue')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+
+        $schedule->command('documents:check-expiry')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+        $schedule->command('hr:check-probation-contract')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+        $schedule->command('hr:check-special-days')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+        $schedule->command('projects:notify-domain-expiries')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+        $schedule->command('leave:accrue')->everyMinute();
+
 
         // Auto-generate payroll for all active employees for the previous month
         // Runs at 00:05 on the 1st of every month
-        $schedule->command('payroll:generate-monthly')->monthlyOn(1, '00:05');
-        // $schedule->command('payroll:generate-monthly')->everyMinute();
+        $schedule->command('payroll:generate-monthly')->everyMinute();
 
         // Remind employees who haven't punched in once 1 hour has passed
         // since their scheduled working-hour start time.
-        $schedule->command('attendance:send-punchin-reminders')->everyMinute();
+        $schedule->command('attendance:send-punchin-reminders')->dailyAt('09:00');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (\Illuminate\Validation\ValidationException $e, $request) {

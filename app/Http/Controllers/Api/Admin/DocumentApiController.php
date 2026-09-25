@@ -43,8 +43,8 @@ class DocumentApiController extends ApiController
             }
         }
 
-        $documents = $query->paginate($perPage);
-        $documents->getCollection()->each->append('shared_users');
+        $documents = $query->get();
+        $documents->each->append('shared_users');
 
         return $this->success($documents);
     }
@@ -201,7 +201,7 @@ class DocumentApiController extends ApiController
      */
     public function getFolders(): JsonResponse
     {
-        $folders = Folder::orderBy('name')->get()->map(fn (Folder $f) => [
+        $folders = Folder::orderBy('name')->get()->map(fn(Folder $f) => [
             'id' => $f->id,
             'name' => $f->name,
             'parent_id' => $f->parent_id,

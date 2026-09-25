@@ -17,6 +17,8 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
+    'allowed_methods' => ['*'],
+
     'allowed_origins' => [
         'https://mostech.ae',
         'https://mostech.ae/Mostech-HRMS',

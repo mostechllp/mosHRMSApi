@@ -2,13 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Models\EmployeeSalaryComponent;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 use App\Models\Employee;
 use App\Models\Payroll;
 use App\Models\AttendanceLog;
-use App\Models\EmployeeSalaryPackage;
 
 class GenerateMonthlyPayroll extends Command
 {
@@ -139,139 +139,75 @@ class GenerateMonthlyPayroll extends Command
             ->where('log_status', 'out')
             ->get();
 
+        $workedDays = $attendanceLogs->count();
+
         if ($attendanceLogs->isEmpty()) {
             return ['success' => false, 'skip_reason' => 'No attendance records found'];
         }
 
-        // 2. Working days (Mon–Sat)
-        $workingDays = max(
-            1,
-            $monthDate->copy()->startOfMonth()
-                ->diffInWeekdays($monthDate->copy()->endOfMonth()) + 1
-        );
-
         // 3. Salary packages
-        $salaryPackages = EmployeeSalaryPackage::where('employee_id', $employee->id)
-            ->with('salaryComponents')
-            ->get();
+        $salaryComponents = EmployeeSalaryComponent::where('employee_id', $employee->id)->get();
 
-        if ($salaryPackages->isEmpty()) {
-            return ['success' => false, 'skip_reason' => 'No salary packages found'];
-        }
+        $workingDays = $monthDate->copy()
+            ->startOfMonth()
+            ->diffInDays($monthDate->copy()->endOfMonth()) + 1;
 
-        $dubaiPackage = null;
-        $homePackage = null;
+        $componentsData = [];
+        $subtotal = 0;
 
-        foreach ($salaryPackages as $pkg) {
-            if (strtoupper($pkg->currency) === 'AED') {
-                $dubaiPackage = $pkg;
-            } else {
-                $homePackage = $pkg;
-            }
-        }
+        foreach ($salaryComponents as $component) {
+            $dailyAmount = (float) $component->value / $workingDays;
+            $amount = round($dailyAmount * $workedDays, 2);
 
-        // 4. Location-based salary calculation
-        $uaeKeywords = [
-            'united arab emirates',
-            'uae',
-            'dubai',
-            'abu dhabi',
-            'sharjah',
-            'ajman',
-            'fujairah',
-            'ras al khaimah',
-            'umm al quwain',
-            'rak',
-            'al ain',
-        ];
-
-        $grouped = $attendanceLogs->groupBy(fn($log) => $log->work_location ?: 'Unknown');
-        $locationBreakdown = [];
-        $totalEarnings = 0.0;
-        $primaryCurrency = $dubaiPackage ? 'AED' : ($homePackage?->currency ?? 'AED');
-
-        foreach ($grouped as $locationName => $logs) {
-            $workedDays = $logs->count();
-            $locLower = strtolower($locationName);
-
-            $isUae = false;
-            foreach ($uaeKeywords as $kw) {
-                if (str_contains($locLower, $kw)) {
-                    $isUae = true;
-                    break;
-                }
-            }
-
-            $selectedPackage = $isUae ? $dubaiPackage : $homePackage;
-            if (!$selectedPackage) {
-                continue;
-            }
-
-            $componentsData = [];
-            $subtotal = 0.0;
-
-            foreach ($selectedPackage->salaryComponents as $component) {
-                $dailyAmount = (float) $component->value / $workingDays;
-                $amount = round($dailyAmount * $workedDays, 2);
-
-                $componentsData[] = [
-                    'id' => $component->id,
-                    'name' => $component->component_name,
-                    'amount' => $amount,
-                ];
-
-                $subtotal += $amount;
-            }
-
-            $pkgDetails = $selectedPackage->toArray();
-            unset($pkgDetails['salary_components']);
-
-            $locationBreakdown[] = [
-                'location_name' => $locationName,
-                'package' => $pkgDetails,
-                'worked_days' => $workedDays,
-                'currency' => [
-                    'code' => $selectedPackage->currency,
-                    'symbol' => $selectedPackage->currency,
-                ],
-                'salary_components' => $componentsData,
-                'subtotal' => round($subtotal, 2),
+            $componentsData[] = [
+                'id' => $component->id,
+                'component_name' => $component->component_name,
+                'value' => $amount,
             ];
 
-            if ($subtotal > 0) {
-                $primaryCurrency = $selectedPackage->currency;
-            }
-
-            $totalEarnings += $subtotal;
+            $subtotal += $amount;
         }
 
-        if (empty($locationBreakdown)) {
-            return ['success' => false, 'skip_reason' => 'No matching salary package for any worked location'];
+        if (empty($salaryComponents)) {
+            return ['success' => false, 'skip_reason' => 'No salary components found'];
         }
 
         // 5. Totals
-        $grossSalary = round($totalEarnings, 2);
+        $grossSalary = round($subtotal, 2);
         $totalDeductions = 0.0;
         $overtime = 0.0;
         $netPay = round($grossSalary + $overtime - $totalDeductions, 2);
         $employeeName = trim($employee->first_name . ' ' . $employee->last_name);
+
+        $locationBreakdown = [
+            [
+                'location_name' => 'Default',
+                'worked_days' => $workedDays,
+                'currency' => [
+                    'code' => $employee->currency ?? 'INR',
+                    'symbol' => $employee->currency ?? 'INR',
+                ],
+                'salary_components' => $componentsData,
+                'subtotal' => round($grossSalary, 2),
+            ]
+        ];
 
         $dataBlob = [
             'step_1' => [
                 'pay_period_month' => (int) $monthDate->format('m'),
                 'pay_period_year' => (int) $monthDate->format('Y'),
                 'period_start' => $startDate,
-                'period_end' =>$endDate,
+                'period_end' => $endDate,
                 'payment_date' => $monthDate->copy()->addMonth()->day(5)->format('Y-m-d'),
                 'payment_mode' => 'Bank Transfer',
-                'total_working_days' => $workingDays,
-                'days_present' => $attendanceLogs->count(),
+                'total_working_days' => (int) $workingDays,
+                'days_present' => (int)$attendanceLogs->count(),
             ],
             'step_2' => [
                 'pay_period_month' => (int) $monthDate->format('m'),
                 'pay_period_year' => (int) $monthDate->format('Y'),
-                'package_ids' => array_values(array_filter([$dubaiPackage?->id, $homePackage?->id])),
                 'location_breakdown' => $locationBreakdown,
+                'salary_components' => $componentsData,
                 'total_earnings' => $grossSalary,
                 'total_deductions' => 0.0,
                 'gross_salary' => $grossSalary,
@@ -298,7 +234,7 @@ class GenerateMonthlyPayroll extends Command
             'net_pay' => $netPay,
             'overtime' => $overtime,
             'deductions' => $totalDeductions,
-            'currency' => $primaryCurrency,
+            'currency' => $employee->currency ?? 'INR',
             'data' => $dataBlob,
         ];
     }

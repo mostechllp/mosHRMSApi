@@ -11,6 +11,9 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 
+use App\Notifications\DomainExpiryNotification;
+use Illuminate\Support\Facades\Notification;
+
 class SendDomainExpiryNotifications extends Command
 {
     /**
@@ -89,32 +92,65 @@ class SendDomainExpiryNotifications extends Command
 
         if (empty($domainsList) && empty($emailsList)) {
             $this->info("No domains or project emails expiring within {$daysThreshold} days.");
-            return Command::SUCCESS;
+            return self::SUCCESS;
         }
 
-        // Find recipients: Admins + Project Managers / Team Leads of affected projects
-        $adminEmails = User::where('type', 'admin')
-            ->orWhereHas('role', function ($q) {
-                $q->whereIn('name', ['Super Admin', 'Admin', 'HR Manager']);
-            })
-            ->pluck('email')
-            ->filter()
-            ->unique()
-            ->toArray();
+        // Target active HR users
+        $hrUsers = User::where('type', 'hr')
+            ->where('status', 'active')
+            ->get();
 
-        $recipientEmails = array_unique(array_filter($adminEmails));
+        if ($hrUsers->isEmpty()) {
+            $this->warn('No active HR users found to notify.');
+            return self::SUCCESS;
+        }
 
-        foreach ($recipientEmails as $email) {
-            try {
-                Mail::to($email)->send(new ProjectDomainExpiryMail('Admin', $domainsList, $emailsList, $daysThreshold));
-                $this->info("Expiry notification sent to: {$email}");
-            } catch (\Exception $e) {
-                Log::error("Failed to send domain expiry notification to {$email}: " . $e->getMessage());
-                $this->error("Failed to send to {$email}: " . $e->getMessage());
+        // 1. Send Database & Email Notifications to HR users
+        foreach ($domainsList as $domainItem) {
+            $statusText = $domainItem['status'] === 'expired' ? 'expired' : 'expiring soon';
+            $data = [
+                'type' => 'domain_expiry',
+                'title' => "Domain Expiry Alert: {$domainItem['domain_name']}",
+                'name' => $domainItem['domain_name'],
+                'project_name' => $domainItem['project_name'],
+                'expiry_date' => $domainItem['domain_expiry_date'],
+                'days_remaining' => $domainItem['days_remaining'],
+                'status' => $domainItem['status'],
+                'message' => "The domain '{$domainItem['domain_name']}' for project '{$domainItem['project_name']}' is {$statusText} (Expiry Date: {$domainItem['domain_expiry_date']}).",
+            ];
+
+            foreach ($hrUsers as $user) {
+                try {
+                    $user->notify(new DomainExpiryNotification($data));
+                } catch (\Throwable $e) {
+                    Log::error("Failed to notify HR user {$user->id} ({$user->email}): " . $e->getMessage());
+                }
             }
         }
 
-        $this->info("Domain and Email expiry notifications processed successfully.");
-        return Command::SUCCESS;
+        foreach ($emailsList as $emailItem) {
+            $statusText = $emailItem['status'] === 'expired' ? 'expired' : 'expiring soon';
+            $data = [
+                'type' => 'project_email_expiry',
+                'title' => "Project Email Expiry Alert: {$emailItem['email_name']}",
+                'name' => $emailItem['email_name'],
+                'project_name' => $emailItem['project_name'],
+                'expiry_date' => $emailItem['expiry_date'],
+                'days_remaining' => $emailItem['days_remaining'],
+                'status' => $emailItem['status'],
+                'message' => "The project email '{$emailItem['email_name']}' for project '{$emailItem['project_name']}' is {$statusText} (Expiry Date: {$emailItem['expiry_date']}).",
+            ];
+
+            foreach ($hrUsers as $user) {
+                try {
+                    $user->notify(new DomainExpiryNotification($data));
+                } catch (\Throwable $e) {
+                    Log::error("Failed to notify HR user {$user->id} ({$user->email}): " . $e->getMessage());
+                }
+            }
+        }
+
+        $this->info("Domain and Email expiry notifications dispatched to HR users successfully.");
+        return self::SUCCESS;
     }
 }

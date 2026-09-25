@@ -417,7 +417,14 @@ class EmployeeOnboardingApiController extends ApiController
             }
         });
 
-        return $this->success($employee->fresh()->load('salaryComponents'), 'Salary details saved successfully');
+        $employee->refresh();
+        $employee->load('salaryComponents');
+
+        return $this->success([
+            'currency' => $employee->currency,
+            'payment_cycle' => $employee->payment_cycle,
+            'salary_components' => $employee->salaryComponents,
+        ], 'Salary details saved successfully');
     }
 
     /**
@@ -717,16 +724,16 @@ class EmployeeOnboardingApiController extends ApiController
             && !empty($employee->user->designation_id);
 
         // Step 2: Professional Verification
-        $verificationComplete = $employee->verification !== null
-            && (
-                !empty($employee->verification->linkedin_url)
-                || !empty($employee->verification->github_url)
-                || !empty($employee->verification->portfolio_url)
-                || !empty($employee->verification->other_professional_url)
-            )
-            && $employee->verification->identity_verified
-            && $employee->verification->credentials_verified
-            && $employee->verification->employment_info_verified;
+        $verificationComplete = $employee->verification !== null;
+            // && (
+            //     !empty($employee->verification->linkedin_url)
+            //     || !empty($employee->verification->github_url)
+            //     || !empty($employee->verification->portfolio_url)
+            //     || !empty($employee->verification->other_professional_url)
+            // )
+            // && $employee->verification->identity_verified
+            // && $employee->verification->credentials_verified
+            // && $employee->verification->employment_info_verified;
 
         // Step 3: Salary — currency, payment_cycle and at least one component
         $salaryComplete = !empty($employee->currency)
@@ -734,7 +741,7 @@ class EmployeeOnboardingApiController extends ApiController
             && $employee->salaryComponents->isNotEmpty();
 
         // Step 4: Bank Details — at least one bank added
-        $banksComplete = $employee->bankDetails->isNotEmpty();
+        // $banksComplete = $employee->bankDetails->isNotEmpty();
 
         // Step 5: Pre-Onboarding Checklist
         $checklistComplete = $employee->preOnboardingChecklist !== null;
@@ -764,22 +771,22 @@ class EmployeeOnboardingApiController extends ApiController
                 'completed' => $salaryComplete,
                 'endpoint' => 'GET /api/admin/employees/onboard/salary/' . $employee->id,
             ],
+            // [
+            //     'step' => 4,
+            //     'key' => 'banks',
+            //     'label' => 'Bank Details',
+            //     'completed' => $banksComplete,
+            //     'endpoint' => 'GET /api/admin/employees/onboard/banks/' . $employee->id,
+            // ],
             [
                 'step' => 4,
-                'key' => 'banks',
-                'label' => 'Bank Details',
-                'completed' => $banksComplete,
-                'endpoint' => 'GET /api/admin/employees/onboard/banks/' . $employee->id,
-            ],
-            [
-                'step' => 5,
                 'key' => 'checklist',
                 'label' => 'Pre-Onboarding Checklist',
                 'completed' => $checklistComplete,
                 'endpoint' => 'GET /api/admin/employees/onboard/checklist/' . $employee->id,
             ],
             [
-                'step' => 6,
+                'step' => 5,
                 'key' => 'complete',
                 'label' => 'Complete Onboarding',
                 'completed' => $isCompleted,
@@ -793,6 +800,7 @@ class EmployeeOnboardingApiController extends ApiController
 
         return $this->success([
             'employee_id' => $employee->id,
+            'verification' => $employee->verification,
             'employee_name' => trim($employee->first_name . ' ' . $employee->last_name),
             'status' => $employee->user?->status ?? 'onboarding',
             'percentage' => $percentage,
