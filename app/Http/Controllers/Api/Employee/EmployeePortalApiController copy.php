@@ -747,7 +747,7 @@ class EmployeePortalApiController extends ApiController
             return $this->error('Medical certificate is required for sick leave', 422);
         }
 
-        
+
 
         $start = Carbon::parse($request->start_date);
         $end = Carbon::parse($request->end_date);

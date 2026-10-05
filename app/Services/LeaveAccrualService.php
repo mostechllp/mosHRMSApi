@@ -6,6 +6,8 @@ use App\Models\Employee;
 use App\Models\LeaveAllocation;
 use App\Models\LeaveAccrual;
 use App\Models\LeavePolicy;
+use App\Models\LeaveRequest;
+use App\Models\LeaveType;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -231,12 +233,51 @@ class LeaveAccrualService
         }
 
         /*
-         * Accrual amount configured by admin.
+         * Calculate accrual days:
+         * - Month 1 of probation (end of month 1): 1.0 day
+         * - Month 2 of probation (end of month 2): 1.0 day
+         * - Month 3 of probation (end of month 3 / probation end): 2.5 days (total 4.5 for 3 months - 2.0 = 2.5)
+         * - Post-probation: Credit based on days in the month (whether 31, 30, 28, or 29 days)
          */
-        $accrualDays = min(
-            (float) $policy->accrual_days,
-            $remaining
-        );
+        $probationStart = !empty($employee->probation_start_date)
+            ? Carbon::parse($employee->probation_start_date)
+            : (!empty($employee->joining_date) ? Carbon::parse($employee->joining_date) : null);
+
+        $probationEnd = !empty($employee->probation_end_date)
+            ? Carbon::parse($employee->probation_end_date)
+            : ($probationStart ? $probationStart->copy()->addMonths(3)->subDay() : null);
+
+        $periodStart = $periodDate->copy()->startOfMonth();
+
+        $configuredDays = (float) ($policy->accrual_days > 0 ? $policy->accrual_days : 1.5);
+
+        if ($probationStart && $probationEnd) {
+            $probationStartMonth = $probationStart->copy()->startOfMonth();
+            $probationEndMonth = $probationEnd->copy()->startOfMonth();
+
+            if ($periodStart->gte($probationStartMonth) && $periodStart->lte($probationEndMonth)) {
+                // Total full months in probation
+                $totalProbationMonths = (int) max(1, $probationStartMonth->diffInMonths($probationEndMonth) + 1);
+
+                if ($periodStart->eq($probationEndMonth)) {
+                    // End of probation month: Credit 1.0 for this month PLUS the rest of the probation accrual
+                    // Rest of probation accrual = totalProbationMonths * (configuredDays - 1.0)
+                    $restOfAccrual = $totalProbationMonths * max(0, $configuredDays - 1.0);
+                    $accrualDays = 1.0 + $restOfAccrual;
+                } else {
+                    // Intermediate probation month: Credit 1.0 day at the end of each probation month
+                    $accrualDays = 1.0;
+                }
+            } else {
+                // Post-probation: Credit full accrual days from policy
+                $accrualDays = $configuredDays;
+            }
+        } else {
+            // Post-probation / No probation: Credit full accrual days from policy
+            $accrualDays = $configuredDays;
+        }
+
+        $accrualDays = min($accrualDays, $remaining);
 
         if ($accrualDays <= 0) {
             return 'skipped';

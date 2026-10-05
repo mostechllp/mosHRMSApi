@@ -94,6 +94,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::post('notifications/{id}/mark-as-read', [DashboardApiController::class, 'markAsRead'])->middleware('permission:dashboard.edit');
     // Employees
     Route::get('employees', [EmployeeApiController::class, 'index'])->middleware('permission:employees.read');
+    Route::get('active-employees', [EmployeeApiController::class, 'getActiveEmployees'])->middleware('permission:employees.read');
     Route::get('employees/{employee}', [EmployeeApiController::class, 'show'])->middleware('permission:employees.read');
     Route::post('employees', [EmployeeApiController::class, 'store'])->middleware('permission:employees.edit');
     Route::put('employees/{employee}', [EmployeeApiController::class, 'update'])->middleware('permission:employees.edit');
@@ -223,11 +224,11 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::post('leave-types/{leaveType}/status', [LeaveTypeApiController::class, 'updateStatus'])->middleware('permission:leaves.edit');
 
     // Leave policy
-    Route::get('/leave-policies',[LeavePolicyController::class, 'index'])->middleware('permission:leaves.read');
-    Route::post('/leave-policies',[LeavePolicyController::class, 'store'])->middleware('permission:leaves.edit');
-    Route::get('/leave-policies/{id}',[LeavePolicyController::class, 'show'])->middleware('permission:leaves.read');
-    Route::put('/leave-policies/{id}',[LeavePolicyController::class, 'update'])->middleware('permission:leaves.edit');
-    Route::delete('/leave-policies/{id}',[LeavePolicyController::class, 'destroy'])->middleware('permission:leaves.delete');
+    Route::get('/leave-policies', [LeavePolicyController::class, 'index'])->middleware('permission:leaves.read');
+    Route::post('/leave-policies', [LeavePolicyController::class, 'store'])->middleware('permission:leaves.edit');
+    Route::get('/leave-policies/{id}', [LeavePolicyController::class, 'show'])->middleware('permission:leaves.read');
+    Route::put('/leave-policies/{id}', [LeavePolicyController::class, 'update'])->middleware('permission:leaves.edit');
+    Route::delete('/leave-policies/{id}', [LeavePolicyController::class, 'destroy'])->middleware('permission:leaves.delete');
 
     // Working Hours
     Route::get('working-hours', [WorkingHourApiController::class, 'index'])->middleware('permission:settings.read');

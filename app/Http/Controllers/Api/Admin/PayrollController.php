@@ -1753,7 +1753,7 @@ class PayrollController extends Controller
                 $totalLeaveDays += $days;
 
                 $leaveDetails[] = [
-                    'leave_type' => $leave->leave_type ?? $leave->type ?? 'Leave',
+                    'leave_type' => $leave->leave_type->name ?? $leave->type ?? 'Leave',
                     'start_date' => $effectiveStart->format('d M, Y'),
                     'end_date' => $effectiveEnd->format('d M, Y'),
                     'days' => $days,
@@ -1769,7 +1769,7 @@ class PayrollController extends Controller
             : ($stepData['step_1']['payment_date'] ?? null);
 
         $currency = $payroll->currency ?? 'AED';
-        $currencySymbol = match(strtoupper($currency)) {
+        $currencySymbol = match (strtoupper($currency)) {
             'INR' => '₹',
             'USD' => '$',
             'EUR' => '€',

@@ -70,9 +70,9 @@ class LeaveAllocationApiController extends ApiController
 
                     return [
                         'leave_type' => $leaveType->name,
-                        'allocated' => $allocated,
-                        'used' => $used,
-                        'balance' => $allocated - $used,
+                        'allocated' => max(0, $allocated),
+                        'used' => max(0, $used),
+                        'balance' => max(0, $allocated - $used),
                     ];
                 })->values(),
             ];
@@ -86,30 +86,90 @@ class LeaveAllocationApiController extends ApiController
      */
     public function show(Employee $employee): JsonResponse
     {
+        // $leaveTypes = LeaveType::where('status', true)->get();
+        // $allocations = LeaveAllocation::where('employee_id', $employee->id)
+        //     ->where('year', date('Y'))
+        //     ->get()
+        //     ->keyBy('leave_type_id');
+
+        // $used = LeaveRequest::where('employee_id', $employee->id)
+        //     ->where('status', 'approved')
+        //     ->sum('duration_days');
+
+        // $allocated = LeaveAllocation::where('employee_id', $employee->id)
+        //     ->where('year', date('Y'))
+        //     ->sum('allocated_days');
+
+        // $balance = max(0, $allocated - $used);
+
+        // return $this->success([
+        //     'employee' => $employee,
+        //     'leave_types' => $leaveTypes,
+        //     'allocations' => $allocations,
+        //     'balance' => max(0, $balance),
+        //     'used' => max(0, $used),
+        //     'allocated' => max(0, $allocated),
+        // ]);
+
+        $employee = Employee::with('user')
+            ->whereHas('user', function ($query) {
+                $query->where('type', '!=', 'admin')
+                    ->where('status', 'active');
+            })
+            ->find($employee->id);
+
+        if (!$employee) {
+            return $this->error('Employee not found', 404);
+        }
+
         $leaveTypes = LeaveType::where('status', true)->get();
-        $allocations = LeaveAllocation::where('employee_id', $employee->id)
-            ->where('year', date('Y'))
-            ->get()
-            ->keyBy('leave_type_id');
 
-        $used = LeaveRequest::where('employee_id', $employee->id)
+        $usedLeaves = LeaveRequest::where('employee_id', $employee->id)
             ->where('status', 'approved')
-            ->sum('duration_days');
+            ->select(
+                'employee_id',
+                'leave_type_id',
+                DB::raw('SUM(duration_days) as used_days')
+            )
+            ->groupBy('employee_id', 'leave_type_id')
+            ->get();
 
-        $allocated = LeaveAllocation::where('employee_id', $employee->id)
-            ->where('year', date('Y'))
-            ->sum('allocated_days');
+        $allocatedLeaves = LeaveAllocation::where('employee_id', $employee->id)
+            ->select(
+                'employee_id',
+                'leave_type_id',
+                DB::raw('SUM(allocated_days) as allocated_days')
+            )
+            ->groupBy('employee_id', 'leave_type_id')
+            ->get();
 
-        $balance = max(0, $allocated - $used);
-
-        return $this->success([
+        $result = [
+            'id' => $employee->id,
             'employee' => $employee,
-            'leave_types' => $leaveTypes,
-            'allocations' => $allocations,
-            'balance' => $balance,
-            'used' => $used,
-            'allocated' => $allocated,
-        ]);
+            'leave_types' => $leaveTypes->map(function ($leaveType) use ($usedLeaves, $allocatedLeaves) {
+
+                $used = (float) (
+                    optional(
+                        $usedLeaves->firstWhere('leave_type_id', $leaveType->id)
+                    )->used_days ?? 0
+                );
+
+                $allocated = (float) (
+                    optional(
+                        $allocatedLeaves->firstWhere('leave_type_id', $leaveType->id)
+                    )->allocated_days ?? 0
+                );
+
+                return [
+                    'leave_type' => $leaveType->name,
+                    'allocated' => $allocated,
+                    'used' => $used,
+                    'balance' => max(0, $allocated - $used),
+                ];
+            })->values(),
+        ];
+
+        return $this->success($result);
     }
 
     /**

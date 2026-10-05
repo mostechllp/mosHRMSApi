@@ -11,6 +11,7 @@ use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\LeaveAllocation;
 use App\Models\Employee;
+use App\Models\Holiday;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -275,6 +276,164 @@ class EmployeePortalApiController extends ApiController
             $leavesTodayByDepartment = $mappedLeaves->groupBy('department_name')->toArray();
         }
 
+        $todayCarbon = Carbon::today();
+        $todayMonth = $todayCarbon->month;
+        $todayDay = $todayCarbon->day;
+
+        $allEmployees = Employee::with([
+            'user.department',
+            'user.designation',
+        ])
+            ->whereHas('user', function ($query) {
+                $query->where('status', 'active');
+            })
+            ->get();
+
+        $birthdaysList = [];
+        $specialDaysList = [];
+        $todayBirthdays = [];
+        $todaySpecialDays = [];
+
+        foreach ($allEmployees as $empItem) {
+            $empUser = $empItem->user;
+            $empName = trim(($empItem->first_name ?? '') . ' ' . ($empItem->last_name ?? ''));
+            if (empty($empName) && $empUser) {
+                $empName = $empUser->username;
+            }
+
+            $deptName = $empUser?->department?->name ?? null;
+            $designationName = $empUser?->designation?->name ?? null;
+
+            // 1. Birthday
+            if (!empty($empItem->dob)) {
+                try {
+                    $dob = Carbon::parse($empItem->dob);
+                    $bdayThisYear = Carbon::create($todayCarbon->year, $dob->month, $dob->day)->startOfDay();
+                    if ($bdayThisYear->lt($todayCarbon)) {
+                        $nextBday = Carbon::create($todayCarbon->year + 1, $dob->month, $dob->day)->startOfDay();
+                    } else {
+                        $nextBday = $bdayThisYear;
+                    }
+                    $isToday = ($dob->month === $todayMonth && $dob->day === $todayDay);
+                    $daysUntil = (int) $todayCarbon->diffInDays($nextBday, false);
+
+                    $bdayItem = [
+                        'id' => $empItem->id,
+                        'employee_id' => $empItem->employee_id,
+                        'employee_name' => $empName,
+                        'department_name' => $deptName,
+                        'designation' => $designationName,
+                        'dob' => $dob->format('Y-m-d'),
+                        'date' => $bdayThisYear->format('Y-m-d'),
+                        'next_date' => $nextBday->format('Y-m-d'),
+                        'is_today' => $isToday,
+                        'days_until' => $daysUntil,
+                        'type' => 'Birthday',
+                        'event_name' => "{$empName}'s Birthday",
+                    ];
+
+                    $birthdaysList[] = $bdayItem;
+                    if ($isToday) {
+                        $todayBirthdays[] = $bdayItem;
+                    }
+
+                    $specialDaysList[] = $bdayItem;
+                    if ($isToday) {
+                        $todaySpecialDays[] = $bdayItem;
+                    }
+                } catch (\Exception $e) {
+                    // Ignore parse error
+                }
+            }
+
+            // 2. Work Anniversary
+            if (!empty($empItem->joining_date)) {
+                try {
+                    $joiningDate = Carbon::parse($empItem->joining_date);
+                    if ($joiningDate->year < $todayCarbon->year) {
+                        $annivThisYear = Carbon::create($todayCarbon->year, $joiningDate->month, $joiningDate->day)->startOfDay();
+                        if ($annivThisYear->lt($todayCarbon)) {
+                            $nextAnniv = Carbon::create($todayCarbon->year + 1, $joiningDate->month, $joiningDate->day)->startOfDay();
+                        } else {
+                            $nextAnniv = $annivThisYear;
+                        }
+                        $isToday = ($joiningDate->month === $todayMonth && $joiningDate->day === $todayDay);
+                        $years = $todayCarbon->year - $joiningDate->year;
+                        $daysUntil = (int) $todayCarbon->diffInDays($nextAnniv, false);
+
+                        $eventName = "{$years} Year Work Anniversary";
+
+                        $annivItem = [
+                            'id' => $empItem->id,
+                            'employee_id' => $empItem->employee_id,
+                            'employee_name' => $empName,
+                            'department_name' => $deptName,
+                            'designation' => $designationName,
+                            'type' => 'Work Anniversary',
+                            'event_name' => "{$empName}'s {$eventName}",
+                            'date' => $annivThisYear->format('Y-m-d'),
+                            'is_today' => $isToday,
+                            'days_until' => $daysUntil,
+                            'years' => $years,
+                        ];
+
+                        $specialDaysList[] = $annivItem;
+                        if ($isToday) {
+                            $todaySpecialDays[] = $annivItem;
+                        }
+                    }
+                } catch (\Exception $e) {
+                    // Ignore parse error
+                }
+            }
+
+            // 3. Custom Special Days
+            if (!empty($empItem->special_days) && is_array($empItem->special_days)) {
+                foreach ($empItem->special_days as $sDay) {
+                    $sDateStr = is_array($sDay) ? ($sDay['date'] ?? null) : null;
+                    $sName = is_array($sDay) ? ($sDay['name'] ?? 'Special Day') : 'Special Day';
+
+                    if ($sDateStr) {
+                        try {
+                            $sDate = Carbon::parse($sDateStr);
+                            $sThisYear = Carbon::create($todayCarbon->year, $sDate->month, $sDate->day)->startOfDay();
+                            if ($sThisYear->lt($todayCarbon)) {
+                                $nextSDay = Carbon::create($todayCarbon->year + 1, $sDate->month, $sDate->day)->startOfDay();
+                            } else {
+                                $nextSDay = $sThisYear;
+                            }
+                            $isToday = ($sDate->month === $todayMonth && $sDate->day === $todayDay);
+                            $daysUntil = (int) $todayCarbon->diffInDays($nextSDay, false);
+
+                            $customItem = [
+                                'id' => $empItem->id,
+                                'employee_id' => $empItem->employee_id,
+                                'employee_name' => $empName,
+                                'department_name' => $deptName,
+                                'designation' => $designationName,
+                                'type' => 'Custom',
+                                'event_name' => "{$empName}'s {$sName}",
+                                'date' => $sThisYear->format('Y-m-d'),
+                                'is_today' => $isToday,
+                                'days_until' => $daysUntil,
+                            ];
+
+                            $specialDaysList[] = $customItem;
+                            if ($isToday) {
+                                $todaySpecialDays[] = $customItem;
+                            }
+                        } catch (\Exception $e) {
+                            // Ignore parse error
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort lists by days_until (upcoming first)
+        usort($birthdaysList, fn($a, $b) => $a['days_until'] <=> $b['days_until']);
+        usort($specialDaysList, fn($a, $b) => $a['days_until'] <=> $b['days_until']);
+
         return $this->success([
             'employee' => $user->employee,
             'days_present' => $days_present,
@@ -296,9 +455,9 @@ class EmployeePortalApiController extends ApiController
                 'working_hours' => $attendance ? $attendance->working_hours : '--'
             ],
             'leave_stats' => [
-                'total_taken' => (float) $totalLeavesTaken,
-                'balance' => (float) $leaveBalance,
-                'allocated' => (float) $totalAllocatedDays,
+                'total_taken' => (float) max(0, $totalLeavesTaken),
+                'balance' => (float) max(0, $leaveBalance),
+                'allocated' => (float) max(0, $totalAllocatedDays),
             ],
             'attendance_history' => $attendanceHistory,
             'can_punch' => $canPunch,
@@ -316,6 +475,12 @@ class EmployeePortalApiController extends ApiController
                 'completed' => $tasksCompleted,
                 'on_hold' => $tasksOnHold,
             ],
+            'birthdays' => $birthdaysList,
+            'special_days' => $specialDaysList,
+            'birthdays_today' => $todayBirthdays,
+            'special_days_today' => $todaySpecialDays,
+            'employee_special_days' => $specialDaysList,
+            'employee_birthdays' => $birthdaysList,
         ]);
     }
 
@@ -853,22 +1018,95 @@ class EmployeePortalApiController extends ApiController
 
         $remainingBalance = max(0, $allocated - $leavesTaken);
 
+        $probationStart = $employee->probation_start_date ? Carbon::parse($employee->probation_start_date) : null;
+        $probationEnd = $employee->probation_end_date ? Carbon::parse($employee->probation_end_date) : null;
+
+        if ($probationStart && $probationEnd) {
+            $leaveStart = Carbon::parse($request->start_date);
+            $probationRestrictionEnd = $probationEnd->copy()->endOfMonth();
+
+            if ($leaveStart->lte($probationRestrictionEnd)) {
+                $monthsSinceStart = (int) $probationStart->copy()->startOfDay()->diffInMonths($leaveStart->copy()->startOfDay());
+                $probationMaxLeaves = 0;
+
+                if ($monthsSinceStart == 0) {
+                    $probationMaxLeaves = 0;
+                } elseif ($monthsSinceStart == 1) {
+                    $probationMaxLeaves = 1;
+                } else {
+                    $probationMaxLeaves = 2; // Up to end of probation restriction period
+                }
+
+                $leavesTakenInRestriction = (float) LeaveRequest::where('employee_id', $employee->id)
+                    ->where('leave_type_id', $request->leave_type_id)
+                    ->whereIn('status', ['approved', 'pending'])
+                    ->whereDate('start_date', '<=', $probationRestrictionEnd)
+                    ->whereDate('start_date', '>=', $probationStart)
+                    ->sum('duration_days');
+
+                $remainingProbationBalance = max(0, $probationMaxLeaves - $leavesTakenInRestriction);
+
+                // Override the bucket balance during probation, because exact joining date
+                // anniversaries (e.g. 15th) happen before the end-of-month cron runs.
+                $remainingBalance = $remainingProbationBalance;
+            }
+        }
+
         if ($remainingBalance == 0) {
             return $this->error("You have 0 days remaining for {$leaveType->name}. Please apply as LOP.", 422);
         }
 
+        // if ($durationDays > $remainingBalance) {
+        //     $bucketDays = $remainingBalance;
+        //     $lopDays = $durationDays - $remainingBalance;
+
+        //     $bucketLeave = LeaveRequest::create([
+        //         'employee_id' => $employee->id,
+        //         'leave_type_id' => $request->leave_type_id,
+        //         'start_date' => $request->start_date,
+        //         'end_date' => $request->end_date,
+        //         'session1' => $session1,
+        //         'session2' => $session2,
+        //         'duration_days' => $bucketDays,
+        //         'claim_salary' => $request->claim_salary ?? false,
+        //         'document' => $documentPath,
+        //         'reason' => $request->reason,
+        //         'status' => 'pending',
+        //     ]);
+
+        //     $lopLeave = LeaveRequest::create([
+        //         'employee_id' => $employee->id,
+        //         'leave_type_id' => $lopLeaveType->id,
+        //         'start_date' => $request->start_date,
+        //         'end_date' => $request->end_date,
+        //         'session1' => $session1,
+        //         'session2' => $session2,
+        //         'duration_days' => $lopDays,
+        //         'claim_salary' => false,
+        //         'document' => $documentPath,
+        //         'reason' => $request->reason . ' (Auto-split LOP)',
+        //         'status' => 'pending',
+        //     ]);
+
+        //     return $this->success([
+        //         'leave' => $bucketLeave,
+        //         'lop_leave' => $lopLeave,
+        //     ], "Leave request submitted successfully. {$bucketDays} day(s) deducted from {$leaveType->name} and {$lopDays} day(s) created under LOP.", 201);
+        // }
+
         if ($durationDays > $remainingBalance) {
-            $bucketDays = $remainingBalance;
-            $lopDays = $durationDays - $remainingBalance;
+            $split = $this->splitLeaveIntoSlots($start, $end, $session1, $session2, $remainingBalance);
+            $bucketDetails = $split['bucket'];
+            $lopDetails = $split['lop'];
 
             $bucketLeave = LeaveRequest::create([
                 'employee_id' => $employee->id,
                 'leave_type_id' => $request->leave_type_id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $bucketDays,
+                'start_date' => $bucketDetails['start_date'],
+                'end_date' => $bucketDetails['end_date'],
+                'session1' => $bucketDetails['session1'],
+                'session2' => $bucketDetails['session2'],
+                'duration_days' => $bucketDetails['duration_days'],
                 'claim_salary' => $request->claim_salary ?? false,
                 'document' => $documentPath,
                 'reason' => $request->reason,
@@ -878,21 +1116,25 @@ class EmployeePortalApiController extends ApiController
             $lopLeave = LeaveRequest::create([
                 'employee_id' => $employee->id,
                 'leave_type_id' => $lopLeaveType->id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $lopDays,
+                'start_date' => $lopDetails['start_date'],
+                'end_date' => $lopDetails['end_date'],
+                'session1' => $lopDetails['session1'],
+                'session2' => $lopDetails['session2'],
+                'duration_days' => $lopDetails['duration_days'],
                 'claim_salary' => false,
                 'document' => $documentPath,
                 'reason' => $request->reason . ' (Auto-split LOP)',
                 'status' => 'pending',
             ]);
 
-            return $this->success([
-                'leave' => $bucketLeave,
-                'lop_leave' => $lopLeave,
-            ], "Leave request submitted successfully. {$bucketDays} day(s) deducted from {$leaveType->name} and {$lopDays} day(s) created under LOP.", 201);
+            return $this->success(
+                [
+                    'leave' => $bucketLeave,
+                    'lop_leave' => $lopLeave,
+                ],
+                "Leave request submitted successfully. {$bucketDetails['duration_days']} day(s) deducted from {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.",
+                201
+            );
         }
 
         $leave = LeaveRequest::create([
@@ -1066,21 +1308,57 @@ class EmployeePortalApiController extends ApiController
 
         $remainingBalance = max(0, $allocated - $leavesTaken);
 
+        $probationStart = $employee->probation_start_date ? Carbon::parse($employee->probation_start_date) : null;
+        $probationEnd = $employee->probation_end_date ? Carbon::parse($employee->probation_end_date) : null;
+
+        if ($probationStart && $probationEnd) {
+            $leaveStart = Carbon::parse($request->start_date);
+            $probationRestrictionEnd = $probationEnd->copy()->endOfMonth();
+
+            if ($leaveStart->lte($probationRestrictionEnd)) {
+                $monthsSinceStart = (int) $probationStart->copy()->startOfDay()->diffInMonths($leaveStart->copy()->startOfDay());
+                $probationMaxLeaves = 0;
+
+                if ($monthsSinceStart == 0) {
+                    $probationMaxLeaves = 0;
+                } elseif ($monthsSinceStart == 1) {
+                    $probationMaxLeaves = 1;
+                } else {
+                    $probationMaxLeaves = 2; // Up to end of probation restriction period
+                }
+
+                $leavesTakenInRestriction = (float) LeaveRequest::where('employee_id', $employee->id)
+                    ->where('leave_type_id', $request->leave_type_id)
+                    ->whereIn('status', ['approved', 'pending'])
+                    ->where('id', '!=', $leave->id)
+                    ->whereDate('start_date', '<=', $probationRestrictionEnd)
+                    ->whereDate('start_date', '>=', $probationStart)
+                    ->sum('duration_days');
+
+                $remainingProbationBalance = max(0, $probationMaxLeaves - $leavesTakenInRestriction);
+
+                // Override the bucket balance during probation, because exact joining date
+                // anniversaries (e.g. 15th) happen before the end-of-month cron runs.
+                $remainingBalance = $remainingProbationBalance;
+            }
+        }
+
         if ($remainingBalance <= 0) {
             return $this->error("You have 0 days remaining for {$leaveType->name}. Please apply as LOP.", 422);
         }
 
         if ($durationDays > $remainingBalance) {
-            $bucketDays = $remainingBalance;
-            $lopDays = $durationDays - $remainingBalance;
+            $split = $this->splitLeaveIntoSlots($start, $end, $session1, $session2, $remainingBalance);
+            $bucketDetails = $split['bucket'];
+            $lopDetails = $split['lop'];
 
             $leave->update([
                 'leave_type_id' => $request->leave_type_id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $bucketDays,
+                'start_date' => $bucketDetails['start_date'],
+                'end_date' => $bucketDetails['end_date'],
+                'session1' => $bucketDetails['session1'],
+                'session2' => $bucketDetails['session2'],
+                'duration_days' => $bucketDetails['duration_days'],
                 'claim_salary' => $request->claim_salary ?? false,
                 'document' => $documentPath,
                 'reason' => $request->reason,
@@ -1089,11 +1367,11 @@ class EmployeePortalApiController extends ApiController
             $lopLeave = LeaveRequest::create([
                 'employee_id' => $employee->id,
                 'leave_type_id' => $lopLeaveType->id,
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $lopDays,
+                'start_date' => $lopDetails['start_date'],
+                'end_date' => $lopDetails['end_date'],
+                'session1' => $lopDetails['session1'],
+                'session2' => $lopDetails['session2'],
+                'duration_days' => $lopDetails['duration_days'],
                 'claim_salary' => false,
                 'document' => $documentPath,
                 'reason' => $request->reason . ' (Auto-split LOP)',
@@ -1103,7 +1381,7 @@ class EmployeePortalApiController extends ApiController
             return $this->success([
                 'leave' => $leave,
                 'lop_leave' => $lopLeave,
-            ], "Leave request updated successfully. {$bucketDays} day(s) allocated to {$leaveType->name} and {$lopDays} day(s) created under LOP.");
+            ], "Leave request updated successfully. {$bucketDetails['duration_days']} day(s) allocated to {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.");
         }
 
         $leave->update([
@@ -1354,5 +1632,86 @@ class EmployeePortalApiController extends ApiController
         $wfh->delete();
 
         return $this->success(null, 'WFH request deleted successfully');
+    }
+
+    private function splitLeaveIntoSlots(Carbon $start, Carbon $end, ?string $session1, ?string $session2, float $remainingBalance): array
+    {
+        $holidays = Holiday::whereBetween('holiday_date', [
+            $start->format('Y-m-d'),
+            $end->format('Y-m-d')
+        ])
+            ->pluck('holiday_date')
+            ->map(fn($date) => Carbon::parse($date)->format('Y-m-d'))
+            ->toArray();
+
+        $isNonWorkingDay = function (Carbon $date) use ($holidays) {
+            return $date->isSunday() || in_array($date->format('Y-m-d'), $holidays);
+        };
+
+        $activeSlots = [];
+        $currentDate = $start->copy();
+
+        while ($currentDate->lte($end)) {
+            if (!$isNonWorkingDay($currentDate)) {
+                $dateStr = $currentDate->format('Y-m-d');
+
+                if ($start->isSameDay($end)) {
+                    if (empty($session1) && empty($session2)) {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } elseif ($session1 === 'morning' && $session2 === 'afternoon') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } elseif ($session1 === 'afternoon' && $session2 === 'afternoon') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } elseif ($session1 === 'morning' && $session2 === 'morning') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                    } else {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    }
+                } elseif ($currentDate->isSameDay($start)) {
+                    if ($session1 === 'afternoon') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } else {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    }
+                } elseif ($currentDate->isSameDay($end)) {
+                    if ($session2 === 'morning') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                    } else {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    }
+                } else {
+                    $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                    $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                }
+            }
+            $currentDate->addDay();
+        }
+
+        $bucketSlotCount = (int) round($remainingBalance * 2);
+        $bucketSlots = array_slice($activeSlots, 0, $bucketSlotCount);
+        $lopSlots = array_slice($activeSlots, $bucketSlotCount);
+
+        $getLeaveDetails = function (array $slots) {
+            if (empty($slots)) {
+                return null;
+            }
+            return [
+                'start_date' => $slots[0]['date'],
+                'end_date' => $slots[count($slots) - 1]['date'],
+                'session1' => $slots[0]['session'],
+                'session2' => $slots[count($slots) - 1]['session'],
+                'duration_days' => count($slots) * 0.5,
+            ];
+        };
+
+        return [
+            'bucket' => $getLeaveDetails($bucketSlots),
+            'lop' => $getLeaveDetails($lopSlots),
+        ];
     }
 }

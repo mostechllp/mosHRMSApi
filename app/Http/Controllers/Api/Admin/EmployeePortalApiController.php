@@ -9,6 +9,7 @@ use App\Models\WfhRequest;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\Employee;
+use App\Models\Holiday;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -440,17 +441,18 @@ class EmployeePortalApiController extends ApiController
         }
 
         if ($durationDays > $remainingBalance) {
-            $bucketDays = $remainingBalance;
-            $lopDays = $durationDays - $remainingBalance;
+            $split = $this->splitLeaveIntoSlots($start, $end, $session1, $session2, $remainingBalance);
+            $bucketDetails = $split['bucket'];
+            $lopDetails = $split['lop'];
 
             $bucketLeave = LeaveRequest::create([
                 'employee_id' => $employee->id,
                 'leave_type_id' => $request->leave_type_id,
-                'start_date' => $start,
-                'end_date' => $end,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $bucketDays,
+                'start_date' => $bucketDetails['start_date'],
+                'end_date' => $bucketDetails['end_date'],
+                'session1' => $bucketDetails['session1'],
+                'session2' => $bucketDetails['session2'],
+                'duration_days' => $bucketDetails['duration_days'],
                 'claim_salary' => $request->claim_salary ?? false,
                 'document' => $documentPath,
                 'reason' => $request->reason,
@@ -460,11 +462,11 @@ class EmployeePortalApiController extends ApiController
             $lopLeave = LeaveRequest::create([
                 'employee_id' => $employee->id,
                 'leave_type_id' => $lopLeaveType->id,
-                'start_date' => $start,
-                'end_date' => $end,
-                'session1' => $session1,
-                'session2' => $session2,
-                'duration_days' => $lopDays,
+                'start_date' => $lopDetails['start_date'],
+                'end_date' => $lopDetails['end_date'],
+                'session1' => $lopDetails['session1'],
+                'session2' => $lopDetails['session2'],
+                'duration_days' => $lopDetails['duration_days'],
                 'claim_salary' => false,
                 'document' => $documentPath,
                 'reason' => $request->reason . ' (Auto-split LOP)',
@@ -474,7 +476,7 @@ class EmployeePortalApiController extends ApiController
             return $this->success([
                 'leave' => $bucketLeave,
                 'lop_leave' => $lopLeave,
-            ], "Leave request submitted successfully. {$bucketDays} day(s) deducted from {$leaveType->name} and {$lopDays} day(s) created under LOP.", 201);
+            ], "Leave request submitted successfully. {$bucketDetails['duration_days']} day(s) deducted from {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.", 201);
         }
 
         $leave = LeaveRequest::create([
@@ -705,5 +707,86 @@ class EmployeePortalApiController extends ApiController
         $wfh->delete();
 
         return $this->success(null, 'WFH request deleted successfully');
+    }
+
+    private function splitLeaveIntoSlots(Carbon $start, Carbon $end, ?string $session1, ?string $session2, float $remainingBalance): array
+    {
+        $holidays = Holiday::whereBetween('holiday_date', [
+            $start->format('Y-m-d'),
+            $end->format('Y-m-d')
+        ])
+            ->pluck('holiday_date')
+            ->map(fn($date) => Carbon::parse($date)->format('Y-m-d'))
+            ->toArray();
+
+        $isNonWorkingDay = function (Carbon $date) use ($holidays) {
+            return $date->isSunday() || in_array($date->format('Y-m-d'), $holidays);
+        };
+
+        $activeSlots = [];
+        $currentDate = $start->copy();
+
+        while ($currentDate->lte($end)) {
+            if (!$isNonWorkingDay($currentDate)) {
+                $dateStr = $currentDate->format('Y-m-d');
+
+                if ($start->isSameDay($end)) {
+                    if (empty($session1) && empty($session2)) {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } elseif ($session1 === 'morning' && $session2 === 'afternoon') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } elseif ($session1 === 'afternoon' && $session2 === 'afternoon') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } elseif ($session1 === 'morning' && $session2 === 'morning') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                    } else {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    }
+                } elseif ($currentDate->isSameDay($start)) {
+                    if ($session1 === 'afternoon') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } else {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    }
+                } elseif ($currentDate->isSameDay($end)) {
+                    if ($session2 === 'morning') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                    } else {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    }
+                } else {
+                    $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                    $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                }
+            }
+            $currentDate->addDay();
+        }
+
+        $bucketSlotCount = (int) round($remainingBalance * 2);
+        $bucketSlots = array_slice($activeSlots, 0, $bucketSlotCount);
+        $lopSlots = array_slice($activeSlots, $bucketSlotCount);
+
+        $getLeaveDetails = function (array $slots) {
+            if (empty($slots)) {
+                return null;
+            }
+            return [
+                'start_date' => $slots[0]['date'],
+                'end_date' => $slots[count($slots) - 1]['date'],
+                'session1' => $slots[0]['session'],
+                'session2' => $slots[count($slots) - 1]['session'],
+                'duration_days' => count($slots) * 0.5,
+            ];
+        };
+
+        return [
+            'bucket' => $getLeaveDetails($bucketSlots),
+            'lop' => $getLeaveDetails($lopSlots),
+        ];
     }
 }
