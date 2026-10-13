@@ -43,6 +43,13 @@ use App\Http\Controllers\Api\Admin\AssetApiController;
 use App\Http\Controllers\Api\Admin\PayrollController;
 use App\Http\Controllers\Api\Admin\OffboardingChecklistCategoryController;
 use App\Http\Controllers\Api\Admin\WarningApiController;
+use App\Http\Controllers\Api\Admin\LeadApiController;
+use App\Http\Controllers\Api\Admin\LeadFollowUpApiController;
+use App\Http\Controllers\Api\Admin\CustomerApiController;
+use App\Http\Controllers\Api\Admin\ActivityController;
+use App\Http\Controllers\Api\Admin\QuotationController;
+
+
 
 
 /*
@@ -351,7 +358,69 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::post('/{id}/assign', [AssetApiController::class, 'assign']);
         Route::post('/{id}/revoke', [AssetApiController::class, 'revoke']);
     });
+
+    // CRM Leads Management
+    Route::group(['prefix' => 'crm'], function () {
+        Route::get('leads/form-options', [LeadApiController::class, 'formOptions'])->middleware('permission:crm.read');
+        Route::get('leads/stats', [LeadApiController::class, 'stats'])->middleware('permission:crm.read');
+        Route::post('leads/{lead}/convert', [LeadApiController::class, 'convert'])->middleware('permission:crm.edit');
+        Route::post('leads/{lead}/update-status', [LeadApiController::class, 'updateStatus'])->middleware('permission:crm.edit');
+
+        // Export Leads (Excel, CSV, PDF)
+        Route::get('leads/export', [LeadApiController::class, 'export'])->middleware('permission:crm.read');
+        Route::get('leads/export/excel', [LeadApiController::class, 'exportExcel'])->middleware('permission:crm.read');
+        Route::get('leads/export/pdf', [LeadApiController::class, 'exportPdf'])->middleware('permission:crm.read');
+
+        // Lead Resource Routes
+        Route::get('leads', [LeadApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('leads', [LeadApiController::class, 'store'])->middleware('permission:crm.edit');
+        Route::get('leads/{lead}', [LeadApiController::class, 'show'])->middleware('permission:crm.read');
+        Route::put('leads/{lead}', [LeadApiController::class, 'update'])->middleware('permission:crm.edit');
+        Route::delete('leads/{lead}', [LeadApiController::class, 'destroy'])->middleware('permission:crm.delete');
+
+        // Lead Follow-ups
+        Route::get('follow-ups/pending', [LeadFollowUpApiController::class, 'pending'])->middleware('permission:crm.read');
+        Route::get('leads/{lead}/follow-ups', [LeadFollowUpApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('leads/{lead}/follow-ups', [LeadFollowUpApiController::class, 'store'])->middleware('permission:crm.edit');
+        Route::put('leads/follow-ups/{followUp}', [LeadFollowUpApiController::class, 'update'])->middleware('permission:crm.edit');
+        Route::delete('leads/follow-ups/{followUp}', [LeadFollowUpApiController::class, 'destroy'])->middleware('permission:crm.delete');
+
+        // ── Customer Management ──────────────────────────────────────────────
+        Route::get('customers/form-options', [CustomerApiController::class, 'formOptions'])->middleware('permission:crm.read');
+        Route::get('customers/stats', [CustomerApiController::class, 'stats'])->middleware('permission:crm.read');
+        Route::post('customers/{customer}/update-status', [CustomerApiController::class, 'updateStatus'])->middleware('permission:crm.edit');
+
+        // Export Customers (Excel, CSV, PDF)
+        Route::get('customers/export', [CustomerApiController::class, 'export'])->middleware('permission:crm.read');
+        Route::get('customers/export/excel', [CustomerApiController::class, 'exportExcel'])->middleware('permission:crm.read');
+        Route::get('customers/export/pdf', [CustomerApiController::class, 'exportPdf'])->middleware('permission:crm.read');
+
+        // Customer Resource Routes
+        Route::get('customers', [CustomerApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('customers', [CustomerApiController::class, 'store'])->middleware('permission:crm.edit');
+        Route::get('customers/{customer}', [CustomerApiController::class, 'show'])->middleware('permission:crm.read');
+        Route::put('customers/{customer}', [CustomerApiController::class, 'update'])->middleware('permission:crm.edit');
+        Route::delete('customers/{customer}', [CustomerApiController::class, 'destroy'])->middleware('permission:crm.delete');
+        
+        // Activities
+        Route::get('activities/employees', [ActivityController::class, 'getEmployees'])->middleware('permission:crm.read');
+        Route::get('activities/export', [ActivityController::class, 'export'])->middleware('permission:crm.read');
+        Route::apiResource('activities', ActivityController::class)->except(['create', 'edit']);
+
+        // Quotations
+        Route::get('quotations/form-options', [QuotationController::class, 'formOptions'])->middleware('permission:crm.read');
+        Route::get('quotations/export', [QuotationController::class, 'export'])->middleware('permission:crm.read');
+        Route::get('quotations/{quotation}/email-preview', [QuotationController::class, 'emailPreview'])->middleware('permission:crm.read');
+        Route::get('quotations/{quotation}/pdf', [QuotationController::class, 'downloadPdf'])->middleware('permission:crm.read');
+        Route::get('quotations/{quotation}/download-pdf', [QuotationController::class, 'downloadPdf'])->middleware('permission:crm.read');
+        Route::post('quotations/{quotation}/send-email', [QuotationController::class, 'sendEmail'])->middleware('permission:crm.edit');
+        Route::post('quotations/{quotation}/send', [QuotationController::class, 'sendEmail'])->middleware('permission:crm.edit');
+        Route::post('quotations/{quotation}/update-status', [QuotationController::class, 'updateStatus'])->middleware('permission:crm.edit');
+        Route::apiResource('quotations', QuotationController::class)->except(['create', 'edit']);
+    });
 });
+
+
 
 // Employee Protected Routes (Now also using auth:api)
 Route::group(['middleware' => 'auth:api', 'prefix' => 'employee'], function () {

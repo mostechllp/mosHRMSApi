@@ -201,11 +201,6 @@ class DashboardApiController extends ApiController
                     if ($isToday) {
                         $todayBirthdays[] = $bdayItem;
                     }
-
-                    $specialDaysList[] = $bdayItem;
-                    if ($isToday) {
-                        $todaySpecialDays[] = $bdayItem;
-                    }
                 } catch (\Exception $e) {
                     // Ignore parse error
                 }
@@ -253,34 +248,63 @@ class DashboardApiController extends ApiController
             }
 
             // 3. Custom Special Days
+            // Skip entries whose name or date matches birthday/anniversary — already covered by dob and joining_date blocks
             if (!empty($employee->special_days) && is_array($employee->special_days)) {
+
+                // Pre-parse dob and joining_date month+day for comparison
+                $dobMonthDay      = !empty($employee->dob) ? Carbon::parse($employee->dob)->format('m-d') : null;
+                $joiningMonthDay  = !empty($employee->joining_date) ? Carbon::parse($employee->joining_date)->format('m-d') : null;
+
+                // Keywords in the name that indicate birthday or anniversary entries
+                $skipNameKeywords = ['birthday', 'birth day', 'bday', 'anniversary', 'work anniversary', 'joining'];
+
                 foreach ($employee->special_days as $sDay) {
                     $sDateStr = is_array($sDay) ? ($sDay['date'] ?? null) : null;
-                    $sName = is_array($sDay) ? ($sDay['name'] ?? 'Special Day') : 'Special Day';
+                    $sName    = is_array($sDay) ? ($sDay['name'] ?? 'Special Day') : 'Special Day';
+                    $sNameLow = strtolower($sName);
+
+                    // Skip if the name contains any birthday/anniversary keyword
+                    $nameMatches = false;
+                    foreach ($skipNameKeywords as $kw) {
+                        if (str_contains($sNameLow, $kw)) {
+                            $nameMatches = true;
+                            break;
+                        }
+                    }
+                    if ($nameMatches) {
+                        continue;
+                    }
 
                     if ($sDateStr) {
                         try {
-                            $sDate = Carbon::parse($sDateStr);
+                            $sDate       = Carbon::parse($sDateStr);
+                            $sMonthDay   = $sDate->format('m-d');
+
+                            // Skip if date (month+day) matches the employee's dob or joining_date
+                            if ($sMonthDay === $dobMonthDay || $sMonthDay === $joiningMonthDay) {
+                                continue;
+                            }
+
                             $sThisYear = Carbon::create($today->year, $sDate->month, $sDate->day)->startOfDay();
                             if ($sThisYear->lt($today)) {
                                 $nextSDay = Carbon::create($today->year + 1, $sDate->month, $sDate->day)->startOfDay();
                             } else {
                                 $nextSDay = $sThisYear;
                             }
-                            $isToday = ($sDate->month === $todayMonth && $sDate->day === $todayDay);
+                            $isToday   = ($sDate->month === $todayMonth && $sDate->day === $todayDay);
                             $daysUntil = (int) $today->diffInDays($nextSDay, false);
 
                             $customItem = [
-                                'id' => $employee->id,
-                                'employee_id' => $employee->employee_id,
-                                'employee_name' => $employeeName,
+                                'id'              => $employee->id,
+                                'employee_id'     => $employee->employee_id,
+                                'employee_name'   => $employeeName,
                                 'department_name' => $deptName,
-                                'designation' => $designationName,
-                                'type' => 'Custom',
-                                'event_name' => "{$employeeName}'s {$sName}",
-                                'date' => $sThisYear->format('Y-m-d'),
-                                'is_today' => $isToday,
-                                'days_until' => $daysUntil,
+                                'designation'     => $designationName,
+                                'type'            => 'Custom',
+                                'event_name'      => "{$employeeName}'s {$sName}",
+                                'date'            => $sThisYear->format('Y-m-d'),
+                                'is_today'        => $isToday,
+                                'days_until'      => $daysUntil,
                             ];
 
                             $specialDaysList[] = $customItem;
@@ -298,6 +322,21 @@ class DashboardApiController extends ApiController
         // Sort lists by days_until (upcoming first)
         usort($birthdaysList, fn($a, $b) => $a['days_until'] <=> $b['days_until']);
         usort($specialDaysList, fn($a, $b) => $a['days_until'] <=> $b['days_until']);
+
+        // Deduplicate — guard against any entry added more than once from multiple sources
+        $seen = [];
+        $specialDaysList = array_values(array_filter($specialDaysList, function ($item) use (&$seen) {
+            $key = ($item['employee_id'] ?? '') . '|' . ($item['date'] ?? '') . '|' . ($item['type'] ?? '');
+            if (isset($seen[$key])) return false;
+            return $seen[$key] = true;
+        }));
+
+        $seenB = [];
+        $birthdaysList = array_values(array_filter($birthdaysList, function ($item) use (&$seenB) {
+            $key = ($item['employee_id'] ?? '') . '|' . ($item['date'] ?? '');
+            if (isset($seenB[$key])) return false;
+            return $seenB[$key] = true;
+        }));
 
         return $this->success([
             'stats' => [
@@ -336,8 +375,6 @@ class DashboardApiController extends ApiController
             'special_days' => $specialDaysList,
             'birthdays_today' => $todayBirthdays,
             'special_days_today' => $todaySpecialDays,
-            'employee_special_days' => $specialDaysList,
-            'employee_birthdays' => $birthdaysList,
         ]);
     }
 

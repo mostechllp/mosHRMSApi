@@ -893,17 +893,17 @@ class EmployeePortalApiController extends ApiController
             return $this->error('Employee profile not found', 404);
         }
 
-        // Check if there are overlapping leaves
-        $hasOverlap = LeaveRequest::where('employee_id', $employee->id)
-            ->where('status', '!=', 'rejected')
-            ->where(function ($q) use ($request) {
-                $q->where('start_date', '<=', $request->end_date)
-                    ->where('end_date', '>=', $request->start_date);
-            })
-            ->exists();
+        // Check if there are overlapping leaves considering session1 and session2
+        $hasOverlap = $this->hasOverlappingLeave(
+            $employee->id,
+            $request->start_date,
+            $request->end_date,
+            $request->session1,
+            $request->session2
+        );
 
         if ($hasOverlap) {
-            return $this->error('You have already applied/taken leave on the selected date(s).', 422);
+            return $this->error('You have already applied/taken leave on the selected date(s) and session(s).', 422);
         }
 
         $leaveType = LeaveType::find($request->leave_type_id);
@@ -1204,18 +1204,18 @@ class EmployeePortalApiController extends ApiController
             ]);
         }
 
-        // Check if there are overlapping leaves (excluding this leave request)
-        $hasOverlap = LeaveRequest::where('employee_id', $employee->id)
-            ->where('id', '!=', $leave->id)
-            ->where('status', '!=', 'rejected')
-            ->where(function ($q) use ($request) {
-                $q->where('start_date', '<=', $request->end_date)
-                    ->where('end_date', '>=', $request->start_date);
-            })
-            ->exists();
+        // Check if there are overlapping leaves considering session1 and session2 (excluding this leave request)
+        $hasOverlap = $this->hasOverlappingLeave(
+            $employee->id,
+            $request->start_date,
+            $request->end_date,
+            $request->session1,
+            $request->session2,
+            $leave->id
+        );
 
         if ($hasOverlap) {
-            return $this->error('You have already applied/taken leave on the selected date(s).', 422);
+            return $this->error('You have already applied/taken leave on the selected date(s) and session(s).', 422);
         }
 
         $start = Carbon::parse($request->start_date);
@@ -1713,5 +1713,91 @@ class EmployeePortalApiController extends ApiController
             'bucket' => $getLeaveDetails($bucketSlots),
             'lop' => $getLeaveDetails($lopSlots),
         ];
+    }
+
+    /**
+     * Check if a requested leave session overlaps with existing non-rejected leaves for an employee.
+     */
+    private function hasOverlappingLeave(
+        int $employeeId,
+        string $startDateStr,
+        string $endDateStr,
+        ?string $session1,
+        ?string $session2,
+        ?int $excludeLeaveId = null
+    ): bool {
+        $query = LeaveRequest::where('employee_id', $employeeId)
+            ->where('status', '!=', 'rejected')
+            ->where(function ($q) use ($startDateStr, $endDateStr) {
+                $q->where('start_date', '<=', $endDateStr)
+                    ->where('end_date', '>=', $startDateStr);
+            });
+
+        if ($excludeLeaveId) {
+            $query->where('id', '!=', $excludeLeaveId);
+        }
+
+        $existingLeaves = $query->get();
+
+        if ($existingLeaves->isEmpty()) {
+            return false;
+        }
+
+        $reqStart = Carbon::parse($startDateStr);
+        $reqEnd = Carbon::parse($endDateStr);
+
+        $getOccupiedSessions = function (Carbon $startDate, Carbon $endDate, ?string $s1, ?string $s2, Carbon $targetDate): array {
+            if ($startDate->isSameDay($endDate)) {
+                if (empty($s1) && empty($s2)) {
+                    return ['morning', 'afternoon'];
+                }
+                if ($s1 === 'morning' && $s2 === 'afternoon') {
+                    return ['morning', 'afternoon'];
+                }
+                if ($s1 === 'morning' && ($s2 === 'morning' || empty($s2))) {
+                    return ['morning'];
+                }
+                if (empty($s1) && $s2 === 'morning') {
+                    return ['morning'];
+                }
+                if ($s1 === 'afternoon' && ($s2 === 'afternoon' || empty($s2))) {
+                    return ['afternoon'];
+                }
+                if (empty($s1) && $s2 === 'afternoon') {
+                    return ['afternoon'];
+                }
+                return ['morning', 'afternoon'];
+            } else {
+                if ($targetDate->isSameDay($startDate)) {
+                    return ($s1 === 'afternoon') ? ['afternoon'] : ['morning', 'afternoon'];
+                }
+                if ($targetDate->isSameDay($endDate)) {
+                    return ($s2 === 'morning') ? ['morning'] : ['morning', 'afternoon'];
+                }
+                return ['morning', 'afternoon'];
+            }
+        };
+
+        foreach ($existingLeaves as $existLeave) {
+            $existStart = Carbon::parse($existLeave->start_date);
+            $existEnd = Carbon::parse($existLeave->end_date);
+
+            $overlapStart = $reqStart->gte($existStart) ? $reqStart->copy() : $existStart->copy();
+            $overlapEnd = $reqEnd->lte($existEnd) ? $reqEnd->copy() : $existEnd->copy();
+
+            $curr = $overlapStart->copy();
+            while ($curr->lte($overlapEnd)) {
+                $reqSessions = $getOccupiedSessions($reqStart, $reqEnd, $session1, $session2, $curr);
+                $existSessions = $getOccupiedSessions($existStart, $existEnd, $existLeave->session1, $existLeave->session2, $curr);
+
+                if (!empty(array_intersect($reqSessions, $existSessions))) {
+                    return true;
+                }
+
+                $curr->addDay();
+            }
+        }
+
+        return false;
     }
 }
