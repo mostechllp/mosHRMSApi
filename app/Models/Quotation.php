@@ -18,6 +18,7 @@ class Quotation extends Model
         'contact_phone',
         'billing_address',
         'lead_id',
+        'opportunity_id',
         'quotation_date',
         'valid_until',
         'currency',
@@ -125,6 +126,11 @@ class Quotation extends Model
     public function lead()
     {
         return $this->belongsTo(Lead::class);
+    }
+
+    public function opportunity()
+    {
+        return $this->belongsTo(Opportunity::class);
     }
 
     public function items()

@@ -9,6 +9,11 @@ use App\Http\Requests\CRM\UpdateLeadRequest;
 use App\Models\Employee;
 use App\Models\Lead;
 use App\Models\LeadFollowUp;
+use App\Models\LeadPriority;
+use App\Models\LeadQualificationRule;
+use App\Models\LeadSource;
+use App\Models\LeadStatus;
+use App\Models\Product;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -72,9 +77,9 @@ class LeadApiController extends ApiController
         $filename = 'crm_leads_' . now()->format('YmdHis') . '.pdf';
 
         $pdf = Pdf::loadView('reports.generic_pdf', [
-            'data'     => $export->array(),
+            'data' => $export->array(),
             'headings' => $export->headings(),
-            'title'    => 'CRM Leads Report',
+            'title' => 'CRM Leads Report',
         ])->setPaper('a4', 'landscape');
 
         return $pdf->download($filename);
@@ -103,12 +108,12 @@ class LeadApiController extends ApiController
             ->map(function ($emp) {
                 $fullName = trim($emp->first_name . ' ' . ($emp->last_name ?? ''));
                 return [
-                    'id'          => $emp->id,
-                    'name'        => $fullName ?: 'Employee #' . $emp->id,
+                    'id' => $emp->id,
+                    'name' => $fullName ?: 'Employee #' . $emp->id,
                     'employee_id' => $emp->employee_id,
-                    'email'       => $emp->company_email ?? $emp->personal_email,
+                    'email' => $emp->company_email ?? $emp->personal_email,
                     'designation' => optional(optional($emp->user)->designation)->name,
-                    'department'  => optional(optional($emp->user)->department)->name,
+                    'department' => optional(optional($emp->user)->department)->name,
                 ];
             });
 
@@ -121,6 +126,67 @@ class LeadApiController extends ApiController
         $defaultTeams = ['Sales Team Alpha', 'Enterprise Sales', 'SMB Sales', 'Global Sales'];
         $salesTeams = array_values(array_unique(array_merge($defaultTeams, $existingTeams)));
 
+        // Fetch lead statuses from database (fallback to defaults if empty/error)
+        try {
+            $statusRecords = LeadStatus::orderBy('sort_order')->orderBy('name')->get();
+            $leadStatuses = $statusRecords->isNotEmpty()
+                ? $statusRecords->pluck('name')->toArray()
+                : array_column(LeadStatus::DEFAULTS, 'name');
+            $leadStatusesDetail = $statusRecords->isNotEmpty()
+                ? $statusRecords
+                : array_map(fn($item, $i) => array_merge($item, ['id' => $i + 1]), LeadStatus::DEFAULTS, array_keys(LeadStatus::DEFAULTS));
+        } catch (\Throwable $e) {
+            $leadStatuses = array_column(LeadStatus::DEFAULTS, 'name');
+            $leadStatusesDetail = array_map(fn($item, $i) => array_merge($item, ['id' => $i + 1]), LeadStatus::DEFAULTS, array_keys(LeadStatus::DEFAULTS));
+        }
+
+        // Fetch lead sources from database (fallback to defaults if empty/error)
+        try {
+            $sourceRecords = LeadSource::orderBy('sort_order')->orderBy('name')->get();
+            $leadSources = $sourceRecords->isNotEmpty()
+                ? $sourceRecords->pluck('name')->toArray()
+                : LeadSource::DEFAULTS;
+            $leadSourcesDetail = $sourceRecords->isNotEmpty()
+                ? $sourceRecords
+                : array_map(fn($name, $i) => ['id' => $i + 1, 'name' => $name, 'sort_order' => $i + 1], LeadSource::DEFAULTS, array_keys(LeadSource::DEFAULTS));
+        } catch (\Throwable $e) {
+            $leadSources = LeadSource::DEFAULTS;
+            $leadSourcesDetail = array_map(fn($name, $i) => ['id' => $i + 1, 'name' => $name, 'sort_order' => $i + 1], LeadSource::DEFAULTS, array_keys(LeadSource::DEFAULTS));
+        }
+
+        // Fetch lead priorities from database (fallback to defaults if empty/error)
+        try {
+            $priorityRecords = LeadPriority::orderBy('sort_order')->orderBy('name')->get();
+            $priorities = $priorityRecords->isNotEmpty()
+                ? $priorityRecords->pluck('name')->toArray()
+                : array_column(LeadPriority::DEFAULTS, 'name');
+            $prioritiesDetail = $priorityRecords->isNotEmpty()
+                ? $priorityRecords
+                : array_map(fn($item, $i) => array_merge($item, ['id' => $i + 1]), LeadPriority::DEFAULTS, array_keys(LeadPriority::DEFAULTS));
+        } catch (\Throwable $e) {
+            $priorities = array_column(LeadPriority::DEFAULTS, 'name');
+            $prioritiesDetail = array_map(fn($item, $i) => array_merge($item, ['id' => $i + 1]), LeadPriority::DEFAULTS, array_keys(LeadPriority::DEFAULTS));
+        }
+
+        // Fetch qualification rules from database (fallback to defaults if empty/error)
+        try {
+            $qualificationRules = LeadQualificationRule::orderBy('sort_order')->orderBy('id')->get();
+            if ($qualificationRules->isEmpty()) {
+                $qualificationRules = collect(array_map(fn($item, $i) => array_merge($item, ['id' => $i + 1]), LeadQualificationRule::DEFAULTS, array_keys(LeadQualificationRule::DEFAULTS)));
+            }
+        } catch (\Throwable $e) {
+            $qualificationRules = collect(array_map(fn($item, $i) => array_merge($item, ['id' => $i + 1]), LeadQualificationRule::DEFAULTS, array_keys(LeadQualificationRule::DEFAULTS)));
+        }
+
+        // Fetch products from database if available (fallback to default product names)
+        $defaultProducts = ['HRMS', 'ERP', 'CRM', 'Payroll', 'Attendance System', 'Custom Development'];
+        try {
+            $dbProducts = Product::where('status', Product::STATUS_ACTIVE)->orderBy('name')->pluck('name')->toArray();
+            $interestedProducts = !empty($dbProducts) ? $dbProducts : $defaultProducts;
+        } catch (\Throwable $e) {
+            $interestedProducts = $defaultProducts;
+        }
+
         $options = [
             'lead_types' => [
                 'Company',
@@ -128,31 +194,13 @@ class LeadApiController extends ApiController
                 'Enterprise',
                 'SMB',
             ],
-            'lead_sources' => [
-                'Website',
-                'Referral',
-                'Cold Call',
-                'LinkedIn',
-                'Campaign',
-                'Social Media',
-                'Event',
-                'Other',
-            ],
-            'lead_statuses' => [
-                'New',
-                'Contacted',
-                'Working',
-                'Qualified',
-                'Unqualified',
-                'Converted',
-                'Lost',
-            ],
-            'priorities' => [
-                'Low',
-                'Medium',
-                'High',
-                'Urgent',
-            ],
+            'lead_sources' => $leadSources,
+            'lead_statuses' => $leadStatuses,
+            'priorities' => $priorities,
+            'lead_sources_detail' => $leadSourcesDetail,
+            'lead_statuses_detail' => $leadStatusesDetail,
+            'priorities_detail' => $prioritiesDetail,
+            'qualification_rules' => $qualificationRules,
             'industries' => [
                 'IT Services & Software',
                 'Healthcare & Medical',
@@ -165,14 +213,7 @@ class LeadApiController extends ApiController
                 'Services',
                 'Other',
             ],
-            'interested_products' => [
-                'HRMS',
-                'ERP',
-                'CRM',
-                'Payroll',
-                'Attendance System',
-                'Custom Development',
-            ],
+            'interested_products' => $interestedProducts,
             'follow_up_types' => [
                 'Call',
                 'Meeting',
@@ -181,7 +222,7 @@ class LeadApiController extends ApiController
                 'Task',
             ],
             'salespersons' => $salespersons,
-            'sales_teams'  => $salesTeams,
+            'sales_teams' => $salesTeams,
         ];
 
         return $this->success($options, 'Lead form options retrieved successfully');
@@ -215,15 +256,15 @@ class LeadApiController extends ApiController
             ->pluck('count', 'priority');
 
         return $this->success([
-            'total_leads'              => $totalLeads,
-            'new_leads'                => $newLeads,
-            'qualified_leads'          => $qualifiedLeads,
-            'converted_leads'          => $convertedLeads,
-            'total_expected_value'     => (float) $totalExpectedValue,
+            'total_leads' => $totalLeads,
+            'new_leads' => $newLeads,
+            'qualified_leads' => $qualifiedLeads,
+            'converted_leads' => $convertedLeads,
+            'total_expected_value' => (float) $totalExpectedValue,
             'pending_follow_ups_count' => $pendingFollowUpsCount,
-            'leads_by_status'          => $leadsByStatus,
-            'leads_by_source'          => $leadsBySource,
-            'leads_by_priority'        => $leadsByPriority,
+            'leads_by_status' => $leadsByStatus,
+            'leads_by_source' => $leadsBySource,
+            'leads_by_priority' => $leadsByPriority,
         ]);
     }
 
@@ -242,13 +283,13 @@ class LeadApiController extends ApiController
             // If follow-up date is provided, create initial activity log
             if (!empty($validated['next_follow_up_at'])) {
                 LeadFollowUp::create([
-                    'lead_id'        => $lead->id,
+                    'lead_id' => $lead->id,
                     'follow_up_type' => $validated['follow_up_type'] ?? 'Call',
                     'follow_up_date' => $validated['next_follow_up_at'],
-                    'status'         => 'scheduled',
-                    'notes'          => $validated['follow_up_notes'] ?? null,
-                    'performed_by'   => $lead->assigned_salesperson_id,
-                    'created_by'     => auth()->id(),
+                    'status' => 'scheduled',
+                    'notes' => $validated['follow_up_notes'] ?? null,
+                    'performed_by' => $lead->assigned_salesperson_id,
+                    'created_by' => auth()->id(),
                 ]);
             }
 
@@ -288,13 +329,13 @@ class LeadApiController extends ApiController
             // If next_follow_up_at is changed or passed in update, create or update schedule activity log
             if ($request->has('next_follow_up_at') && !empty($validated['next_follow_up_at'])) {
                 LeadFollowUp::create([
-                    'lead_id'        => $lead->id,
+                    'lead_id' => $lead->id,
                     'follow_up_type' => $validated['follow_up_type'] ?? $lead->follow_up_type ?? 'Call',
                     'follow_up_date' => $validated['next_follow_up_at'],
-                    'status'         => 'scheduled',
-                    'notes'          => $validated['follow_up_notes'] ?? null,
-                    'performed_by'   => $lead->assigned_salesperson_id,
-                    'created_by'     => auth()->id(),
+                    'status' => 'scheduled',
+                    'notes' => $validated['follow_up_notes'] ?? null,
+                    'performed_by' => $lead->assigned_salesperson_id,
+                    'created_by' => auth()->id(),
                 ]);
             }
 
@@ -317,7 +358,7 @@ class LeadApiController extends ApiController
     {
         $validated = $request->validate([
             'lead_status' => 'required|string|max:100',
-            'note'        => 'nullable|string',
+            'note' => 'nullable|string',
         ]);
 
         $lead->lead_status = $validated['lead_status'];

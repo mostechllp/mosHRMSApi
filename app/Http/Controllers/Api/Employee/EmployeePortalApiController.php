@@ -1034,7 +1034,7 @@ class EmployeePortalApiController extends ApiController
                 } elseif ($monthsSinceStart == 1) {
                     $probationMaxLeaves = 1;
                 } else {
-                    $probationMaxLeaves = 2; // Up to end of probation restriction period
+                    $probationMaxLeaves = 1.5; // Up to end of probation restriction period
                 }
 
                 $leavesTakenInRestriction = (float) LeaveRequest::where('employee_id', $employee->id)
@@ -1324,7 +1324,7 @@ class EmployeePortalApiController extends ApiController
                 } elseif ($monthsSinceStart == 1) {
                     $probationMaxLeaves = 1;
                 } else {
-                    $probationMaxLeaves = 2; // Up to end of probation restriction period
+                    $probationMaxLeaves = 1.5; // Up to end of probation restriction period
                 }
 
                 $leavesTakenInRestriction = (float) LeaveRequest::where('employee_id', $employee->id)

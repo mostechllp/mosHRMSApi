@@ -31,7 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('hr:check-probation-contract')->weeklyOn(CarbonInterface::MONDAY, '00:05');
         $schedule->command('hr:check-special-days')->weeklyOn(CarbonInterface::MONDAY, '00:05');
         $schedule->command('projects:notify-domain-expiries')->weeklyOn(CarbonInterface::MONDAY, '00:05');
-        Schedule::command('leave:accrue')
+        $schedule->command('leave:accrue')
             ->dailyAt('23:55')
             ->timezone('Asia/Kolkata')
             ->when(function () {

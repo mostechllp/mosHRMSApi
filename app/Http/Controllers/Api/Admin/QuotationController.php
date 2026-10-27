@@ -9,8 +9,14 @@ use App\Models\Activity;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Lead;
+use App\Models\Opportunity;
+use App\Models\ProductCurrency;
+use App\Models\ProductTaxRate;
 use App\Models\Quotation;
+use App\Models\QuotationCurrency;
 use App\Models\QuotationItem;
+use App\Models\QuotationPaymentTerm;
+use App\Models\QuotationTaxRate;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -340,7 +346,7 @@ class QuotationController extends ApiController
                 'payment_terms'  => $c->payment_terms,
             ]);
 
-        // Open leads (opportunities)
+        // Open leads
         $leads = Lead::select('id', 'lead_id', 'lead_name', 'company_name')
             ->whereNotIn('lead_status', ['Closed', 'Lost'])
             ->orderBy('lead_name')
@@ -351,13 +357,72 @@ class QuotationController extends ApiController
                 'label'        => $l->lead_name . ($l->company_name ? ' – ' . $l->company_name : ''),
             ]);
 
+        // Open Opportunities
+        $opportunities = Opportunity::select('id', 'opportunity_id', 'name', 'customer_id', 'estimated_value', 'currency')
+            ->open()
+            ->orderBy('name')
+            ->get()
+            ->map(fn ($o) => [
+                'id'              => $o->id,
+                'opportunity_id'  => $o->opportunity_id,
+                'name'            => $o->name,
+                'label'           => ($o->opportunity_id ? $o->opportunity_id . ' – ' : '') . $o->name,
+                'customer_id'     => $o->customer_id,
+                'estimated_value' => $o->estimated_value,
+                'currency'        => $o->currency,
+            ]);
+
+        $year   = now()->year;
+        $nextId = (Quotation::withTrashed()->max('id') ?? 0) + 1;
+        $nextQuotationNumber = 'Q-' . $year . '-' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+
+        // Currencies: Check QuotationCurrency first, fallback to ProductCurrency / default array
+        try {
+            $currencyNames = QuotationCurrency::orderBy('id')->pluck('name')->toArray();
+            if (!empty($currencyNames)) {
+                $currencies = $currencyNames;
+            } else {
+                $currencyList = ProductCurrency::orderBy('id')->get(['code', 'symbol', 'name', 'is_default'])->toArray();
+                $currencies = !empty($currencyList) ? array_column($currencyList, 'code') : QuotationCurrency::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $currencies = QuotationCurrency::DEFAULTS;
+        }
+
+        // Payment Terms: Check QuotationPaymentTerm first, fallback to default array
+        try {
+            $paymentTerms = QuotationPaymentTerm::orderBy('id')->pluck('name')->toArray();
+            if (empty($paymentTerms)) {
+                $paymentTerms = QuotationPaymentTerm::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $paymentTerms = QuotationPaymentTerm::DEFAULTS;
+        }
+
+        // Taxes: Check QuotationTaxRate first, fallback to ProductTaxRate / defaults
+        $taxes = [];
+        try {
+            $taxes = QuotationTaxRate::orderBy('id')->get(['id', 'name', 'rate', 'is_default'])->toArray();
+            if (empty($taxes)) {
+                $taxes = ProductTaxRate::orderBy('id')->get(['id', 'name', 'rate', 'is_default'])->toArray();
+            }
+            if (empty($taxes)) {
+                $taxes = QuotationTaxRate::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $taxes = QuotationTaxRate::DEFAULTS;
+        }
+
         return $this->success([
-            'customers'     => $customers,
-            'leads'         => $leads,
-            'currencies'    => ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'],
-            'payment_terms' => ['Net 15', 'Net 30', 'Net 45', 'Net 60', 'Due on Receipt', 'Advance'],
-            'statuses'      => ['draft', 'sent', 'accepted', 'rejected', 'expired', 'cancelled'],
-            'discount_types'=> ['percent', 'fixed'],
+            'next_quotation_number' => $nextQuotationNumber,
+            'customers'             => $customers,
+            'leads'                 => $leads,
+            'opportunities'         => $opportunities,
+            'currencies'            => $currencies,
+            'payment_terms'         => $paymentTerms,
+            'taxes'                 => $taxes,
+            'statuses'              => ['draft', 'sent', 'accepted', 'rejected', 'expired', 'cancelled'],
+            'discount_types'        => ['percent', 'fixed'],
         ]);
     }
 

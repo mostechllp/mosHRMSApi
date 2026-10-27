@@ -3,6 +3,10 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Models\Activity;
+use App\Models\ActivityPriority;
+use App\Models\ActivityReminderOption;
+use App\Models\ActivitySetting;
+use App\Models\ActivityType;
 use App\Models\Employee;
 use App\Http\Controllers\Controller;
 use App\Exports\ActivityExport;
@@ -209,6 +213,67 @@ class ActivityController extends Controller
         return response()->json([
             'success' => true,
             'data' => $employees,
+        ]);
+    }
+
+    /**
+     * Get reference form options (activity types, priorities, reminders, settings).
+     * GET /api/admin/crm/activities/form-options
+     */
+    public function formOptions(): JsonResponse
+    {
+        // 1. Activity Types
+        try {
+            $types = ActivityType::orderBy('id')->pluck('name')->toArray();
+            if (empty($types)) {
+                $types = ActivityType::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $types = ActivityType::DEFAULTS;
+        }
+
+        // 2. Activity Priorities
+        try {
+            $priorities = ActivityPriority::orderBy('id')->get(['name', 'color'])->toArray();
+            if (empty($priorities)) {
+                $priorities = ActivityPriority::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $priorities = ActivityPriority::DEFAULTS;
+        }
+
+        // 3. Reminder Options
+        try {
+            $reminders = ActivityReminderOption::orderBy('id')->get(['name', 'minutes'])->toArray();
+            if (empty($reminders)) {
+                $reminders = ActivityReminderOption::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $reminders = ActivityReminderOption::DEFAULTS;
+        }
+
+        // 4. Default Duration Setting
+        $defaultDuration = 60;
+        try {
+            $settingVal = ActivitySetting::get('default_duration_minutes', '60');
+            $defaultDuration = (int) ($settingVal ?: 60);
+        } catch (\Throwable $e) {
+            $defaultDuration = 60;
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Activity form options retrieved successfully',
+            'data' => [
+                'activity_types'   => $types,
+                'priorities'       => $priorities,
+                'priority_names'   => array_column($priorities, 'name'),
+                'reminder_options' => $reminders,
+                'reminder_names'   => array_column($reminders, 'name'),
+                'statuses'         => ['Pending', 'In Progress', 'Completed', 'Cancelled'],
+                'related_types'    => ['Lead', 'Customer', 'Opportunity', 'Quotation'],
+                'default_duration_minutes' => $defaultDuration,
+            ],
         ]);
     }
 }

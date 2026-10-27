@@ -252,15 +252,15 @@ class DashboardApiController extends ApiController
             if (!empty($employee->special_days) && is_array($employee->special_days)) {
 
                 // Pre-parse dob and joining_date month+day for comparison
-                $dobMonthDay      = !empty($employee->dob) ? Carbon::parse($employee->dob)->format('m-d') : null;
-                $joiningMonthDay  = !empty($employee->joining_date) ? Carbon::parse($employee->joining_date)->format('m-d') : null;
+                $dobMonthDay = !empty($employee->dob) ? Carbon::parse($employee->dob)->format('m-d') : null;
+                $joiningMonthDay = !empty($employee->joining_date) ? Carbon::parse($employee->joining_date)->format('m-d') : null;
 
                 // Keywords in the name that indicate birthday or anniversary entries
                 $skipNameKeywords = ['birthday', 'birth day', 'bday', 'anniversary', 'work anniversary', 'joining'];
 
                 foreach ($employee->special_days as $sDay) {
                     $sDateStr = is_array($sDay) ? ($sDay['date'] ?? null) : null;
-                    $sName    = is_array($sDay) ? ($sDay['name'] ?? 'Special Day') : 'Special Day';
+                    $sName = is_array($sDay) ? ($sDay['name'] ?? 'Special Day') : 'Special Day';
                     $sNameLow = strtolower($sName);
 
                     // Skip if the name contains any birthday/anniversary keyword
@@ -277,8 +277,8 @@ class DashboardApiController extends ApiController
 
                     if ($sDateStr) {
                         try {
-                            $sDate       = Carbon::parse($sDateStr);
-                            $sMonthDay   = $sDate->format('m-d');
+                            $sDate = Carbon::parse($sDateStr);
+                            $sMonthDay = $sDate->format('m-d');
 
                             // Skip if date (month+day) matches the employee's dob or joining_date
                             if ($sMonthDay === $dobMonthDay || $sMonthDay === $joiningMonthDay) {
@@ -291,20 +291,20 @@ class DashboardApiController extends ApiController
                             } else {
                                 $nextSDay = $sThisYear;
                             }
-                            $isToday   = ($sDate->month === $todayMonth && $sDate->day === $todayDay);
+                            $isToday = ($sDate->month === $todayMonth && $sDate->day === $todayDay);
                             $daysUntil = (int) $today->diffInDays($nextSDay, false);
 
                             $customItem = [
-                                'id'              => $employee->id,
-                                'employee_id'     => $employee->employee_id,
-                                'employee_name'   => $employeeName,
+                                'id' => $employee->id,
+                                'employee_id' => $employee->employee_id,
+                                'employee_name' => $employeeName,
                                 'department_name' => $deptName,
-                                'designation'     => $designationName,
-                                'type'            => 'Custom',
-                                'event_name'      => "{$employeeName}'s {$sName}",
-                                'date'            => $sThisYear->format('Y-m-d'),
-                                'is_today'        => $isToday,
-                                'days_until'      => $daysUntil,
+                                'designation' => $designationName,
+                                'type' => 'Custom',
+                                'event_name' => "{$employeeName}'s {$sName}",
+                                'date' => $sThisYear->format('Y-m-d'),
+                                'is_today' => $isToday,
+                                'days_until' => $daysUntil,
                             ];
 
                             $specialDaysList[] = $customItem;
@@ -327,14 +327,16 @@ class DashboardApiController extends ApiController
         $seen = [];
         $specialDaysList = array_values(array_filter($specialDaysList, function ($item) use (&$seen) {
             $key = ($item['employee_id'] ?? '') . '|' . ($item['date'] ?? '') . '|' . ($item['type'] ?? '');
-            if (isset($seen[$key])) return false;
+            if (isset($seen[$key]))
+                return false;
             return $seen[$key] = true;
         }));
 
         $seenB = [];
         $birthdaysList = array_values(array_filter($birthdaysList, function ($item) use (&$seenB) {
             $key = ($item['employee_id'] ?? '') . '|' . ($item['date'] ?? '');
-            if (isset($seenB[$key])) return false;
+            if (isset($seenB[$key]))
+                return false;
             return $seenB[$key] = true;
         }));
 

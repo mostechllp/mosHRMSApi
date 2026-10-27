@@ -45,9 +45,22 @@ use App\Http\Controllers\Api\Admin\OffboardingChecklistCategoryController;
 use App\Http\Controllers\Api\Admin\WarningApiController;
 use App\Http\Controllers\Api\Admin\LeadApiController;
 use App\Http\Controllers\Api\Admin\LeadFollowUpApiController;
+use App\Http\Controllers\Api\Admin\LeadSettingsApiController;
 use App\Http\Controllers\Api\Admin\CustomerApiController;
 use App\Http\Controllers\Api\Admin\ActivityController;
 use App\Http\Controllers\Api\Admin\QuotationController;
+use App\Http\Controllers\Api\Admin\OpportunityApiController;
+use App\Http\Controllers\Api\Admin\ProposalApiController;
+use App\Http\Controllers\Api\Admin\ProductApiController;
+use App\Http\Controllers\Api\Admin\OpportunitySettingsApiController;
+use App\Http\Controllers\Api\Admin\CustomerSettingsApiController;
+use App\Http\Controllers\Api\Admin\ActivitySettingsApiController;
+use App\Http\Controllers\Api\Admin\ProductSettingsApiController;
+use App\Http\Controllers\Api\Admin\CrmReportApiController;
+use App\Http\Controllers\Api\Admin\CrmDashboardApiController;
+use App\Http\Controllers\Api\Admin\CrmPermissionSettingsApiController;
+use App\Http\Controllers\Api\Admin\QuotationSettingsApiController;
+use App\Http\Controllers\Api\Admin\MeetingApiController;
 
 
 
@@ -359,8 +372,24 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::post('/{id}/revoke', [AssetApiController::class, 'revoke']);
     });
 
+    // ── Meeting Management ────────────────────────────────────────────────
+    Route::get('meetings/form-options', [MeetingApiController::class, 'formOptions'])->middleware('permission:crm.read');
+    Route::get('meetings/participants/search', [MeetingApiController::class, 'searchParticipants'])->middleware('permission:crm.read');
+    Route::patch('meetings/{meeting}/status', [MeetingApiController::class, 'updateStatus'])->middleware('permission:crm.edit');
+    Route::post('meetings/{meeting}/status', [MeetingApiController::class, 'updateStatus'])->middleware('permission:crm.edit');
+    Route::get('meetings', [MeetingApiController::class, 'index'])->middleware('permission:crm.read');
+    Route::post('meetings', [MeetingApiController::class, 'store'])->middleware('permission:crm.edit');
+    Route::get('meetings/{meeting}', [MeetingApiController::class, 'show'])->middleware('permission:crm.read');
+    Route::put('meetings/{meeting}', [MeetingApiController::class, 'update'])->middleware('permission:crm.edit');
+    Route::patch('meetings/{meeting}', [MeetingApiController::class, 'update'])->middleware('permission:crm.edit');
+    Route::delete('meetings/{meeting}', [MeetingApiController::class, 'destroy'])->middleware('permission:crm.delete');
+
+
     // CRM Leads Management
     Route::group(['prefix' => 'crm'], function () {
+        // CRM Dashboard
+        Route::get('dashboard', [CrmDashboardApiController::class, 'index'])->middleware('permission:crm.read');
+
         Route::get('leads/form-options', [LeadApiController::class, 'formOptions'])->middleware('permission:crm.read');
         Route::get('leads/stats', [LeadApiController::class, 'stats'])->middleware('permission:crm.read');
         Route::post('leads/{lead}/convert', [LeadApiController::class, 'convert'])->middleware('permission:crm.edit');
@@ -385,6 +414,39 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::put('leads/follow-ups/{followUp}', [LeadFollowUpApiController::class, 'update'])->middleware('permission:crm.edit');
         Route::delete('leads/follow-ups/{followUp}', [LeadFollowUpApiController::class, 'destroy'])->middleware('permission:crm.delete');
 
+        // ── Lead Settings (Statuses / Sources / Priorities / Qualification Rules) ─
+        Route::get('lead-settings', [LeadSettingsApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('lead-settings/seed-defaults', [LeadSettingsApiController::class, 'seedDefaults'])->middleware('permission:crm.edit');
+
+        // Lead Statuses
+        Route::get('lead-settings/statuses', [LeadSettingsApiController::class, 'indexStatuses'])->middleware('permission:crm.read');
+        Route::post('lead-settings/statuses', [LeadSettingsApiController::class, 'storeStatus'])->middleware('permission:crm.edit');
+        Route::get('lead-settings/statuses/{id}', [LeadSettingsApiController::class, 'showStatus'])->middleware('permission:crm.read');
+        Route::put('lead-settings/statuses/{id}', [LeadSettingsApiController::class, 'updateStatus'])->middleware('permission:crm.edit');
+        Route::delete('lead-settings/statuses/{id}', [LeadSettingsApiController::class, 'destroyStatus'])->middleware('permission:crm.delete');
+
+        // Lead Sources
+        Route::get('lead-settings/sources', [LeadSettingsApiController::class, 'indexSources'])->middleware('permission:crm.read');
+        Route::post('lead-settings/sources', [LeadSettingsApiController::class, 'storeSource'])->middleware('permission:crm.edit');
+        Route::get('lead-settings/sources/{id}', [LeadSettingsApiController::class, 'showSource'])->middleware('permission:crm.read');
+        Route::put('lead-settings/sources/{id}', [LeadSettingsApiController::class, 'updateSource'])->middleware('permission:crm.edit');
+        Route::delete('lead-settings/sources/{id}', [LeadSettingsApiController::class, 'destroySource'])->middleware('permission:crm.delete');
+
+        // Lead Priorities
+        Route::get('lead-settings/priorities', [LeadSettingsApiController::class, 'indexPriorities'])->middleware('permission:crm.read');
+        Route::post('lead-settings/priorities', [LeadSettingsApiController::class, 'storePriority'])->middleware('permission:crm.edit');
+        Route::get('lead-settings/priorities/{id}', [LeadSettingsApiController::class, 'showPriority'])->middleware('permission:crm.read');
+        Route::put('lead-settings/priorities/{id}', [LeadSettingsApiController::class, 'updatePriority'])->middleware('permission:crm.edit');
+        Route::delete('lead-settings/priorities/{id}', [LeadSettingsApiController::class, 'destroyPriority'])->middleware('permission:crm.delete');
+
+        // Lead Qualification Rules
+        Route::get('lead-settings/qualification-rules', [LeadSettingsApiController::class, 'indexQualificationRules'])->middleware('permission:crm.read');
+        Route::post('lead-settings/qualification-rules', [LeadSettingsApiController::class, 'storeQualificationRule'])->middleware('permission:crm.edit');
+        Route::get('lead-settings/qualification-rules/{id}', [LeadSettingsApiController::class, 'showQualificationRule'])->middleware('permission:crm.read');
+        Route::put('lead-settings/qualification-rules/{id}', [LeadSettingsApiController::class, 'updateQualificationRule'])->middleware('permission:crm.edit');
+        Route::patch('lead-settings/qualification-rules/{id}/toggle', [LeadSettingsApiController::class, 'toggleQualificationRule'])->middleware('permission:crm.edit');
+        Route::delete('lead-settings/qualification-rules/{id}', [LeadSettingsApiController::class, 'destroyQualificationRule'])->middleware('permission:crm.delete');
+
         // ── Customer Management ──────────────────────────────────────────────
         Route::get('customers/form-options', [CustomerApiController::class, 'formOptions'])->middleware('permission:crm.read');
         Route::get('customers/stats', [CustomerApiController::class, 'stats'])->middleware('permission:crm.read');
@@ -401,11 +463,73 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::get('customers/{customer}', [CustomerApiController::class, 'show'])->middleware('permission:crm.read');
         Route::put('customers/{customer}', [CustomerApiController::class, 'update'])->middleware('permission:crm.edit');
         Route::delete('customers/{customer}', [CustomerApiController::class, 'destroy'])->middleware('permission:crm.delete');
-        
+
+        // ── Customer Settings (Categories / Industries / Statuses / Types) ────
+        Route::get('customer-settings', [CustomerSettingsApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('customer-settings/seed-defaults', [CustomerSettingsApiController::class, 'seedDefaults'])->middleware('permission:crm.edit');
+
+        // Customer Categories
+        Route::get('customer-settings/categories', [CustomerSettingsApiController::class, 'indexCategories'])->middleware('permission:crm.read');
+        Route::post('customer-settings/categories', [CustomerSettingsApiController::class, 'storeCategory'])->middleware('permission:crm.edit');
+        Route::get('customer-settings/categories/{id}', [CustomerSettingsApiController::class, 'showCategory'])->middleware('permission:crm.read');
+        Route::put('customer-settings/categories/{id}', [CustomerSettingsApiController::class, 'updateCategory'])->middleware('permission:crm.edit');
+        Route::delete('customer-settings/categories/{id}', [CustomerSettingsApiController::class, 'destroyCategory'])->middleware('permission:crm.delete');
+
+        // Customer Industries
+        Route::get('customer-settings/industries', [CustomerSettingsApiController::class, 'indexIndustries'])->middleware('permission:crm.read');
+        Route::post('customer-settings/industries', [CustomerSettingsApiController::class, 'storeIndustry'])->middleware('permission:crm.edit');
+        Route::get('customer-settings/industries/{id}', [CustomerSettingsApiController::class, 'showIndustry'])->middleware('permission:crm.read');
+        Route::put('customer-settings/industries/{id}', [CustomerSettingsApiController::class, 'updateIndustry'])->middleware('permission:crm.edit');
+        Route::delete('customer-settings/industries/{id}', [CustomerSettingsApiController::class, 'destroyIndustry'])->middleware('permission:crm.delete');
+
+        // Customer Statuses
+        Route::get('customer-settings/statuses', [CustomerSettingsApiController::class, 'indexStatuses'])->middleware('permission:crm.read');
+        Route::post('customer-settings/statuses', [CustomerSettingsApiController::class, 'storeStatus'])->middleware('permission:crm.edit');
+        Route::get('customer-settings/statuses/{id}', [CustomerSettingsApiController::class, 'showStatus'])->middleware('permission:crm.read');
+        Route::put('customer-settings/statuses/{id}', [CustomerSettingsApiController::class, 'updateStatus'])->middleware('permission:crm.edit');
+        Route::delete('customer-settings/statuses/{id}', [CustomerSettingsApiController::class, 'destroyStatus'])->middleware('permission:crm.delete');
+
+        // Customer Types
+        Route::get('customer-settings/types', [CustomerSettingsApiController::class, 'indexTypes'])->middleware('permission:crm.read');
+        Route::post('customer-settings/types', [CustomerSettingsApiController::class, 'storeType'])->middleware('permission:crm.edit');
+        Route::get('customer-settings/types/{id}', [CustomerSettingsApiController::class, 'showType'])->middleware('permission:crm.read');
+        Route::put('customer-settings/types/{id}', [CustomerSettingsApiController::class, 'updateType'])->middleware('permission:crm.edit');
+        Route::delete('customer-settings/types/{id}', [CustomerSettingsApiController::class, 'destroyType'])->middleware('permission:crm.delete');
+
         // Activities
+        Route::get('activities/form-options', [ActivityController::class, 'formOptions'])->middleware('permission:crm.read');
         Route::get('activities/employees', [ActivityController::class, 'getEmployees'])->middleware('permission:crm.read');
         Route::get('activities/export', [ActivityController::class, 'export'])->middleware('permission:crm.read');
         Route::apiResource('activities', ActivityController::class)->except(['create', 'edit']);
+
+        // ── Activity Settings (Types / Reminders / Priorities / Duration) ─────
+        Route::get('activity-settings', [ActivitySettingsApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('activity-settings/seed-defaults', [ActivitySettingsApiController::class, 'seedDefaults'])->middleware('permission:crm.edit');
+
+        // Activity Types
+        Route::get('activity-settings/types', [ActivitySettingsApiController::class, 'indexTypes'])->middleware('permission:crm.read');
+        Route::post('activity-settings/types', [ActivitySettingsApiController::class, 'storeType'])->middleware('permission:crm.edit');
+        Route::get('activity-settings/types/{id}', [ActivitySettingsApiController::class, 'showType'])->middleware('permission:crm.read');
+        Route::put('activity-settings/types/{id}', [ActivitySettingsApiController::class, 'updateType'])->middleware('permission:crm.edit');
+        Route::delete('activity-settings/types/{id}', [ActivitySettingsApiController::class, 'destroyType'])->middleware('permission:crm.delete');
+
+        // Activity Reminder Options
+        Route::get('activity-settings/reminders', [ActivitySettingsApiController::class, 'indexReminders'])->middleware('permission:crm.read');
+        Route::post('activity-settings/reminders', [ActivitySettingsApiController::class, 'storeReminder'])->middleware('permission:crm.edit');
+        Route::get('activity-settings/reminders/{id}', [ActivitySettingsApiController::class, 'showReminder'])->middleware('permission:crm.read');
+        Route::put('activity-settings/reminders/{id}', [ActivitySettingsApiController::class, 'updateReminder'])->middleware('permission:crm.edit');
+        Route::delete('activity-settings/reminders/{id}', [ActivitySettingsApiController::class, 'destroyReminder'])->middleware('permission:crm.delete');
+
+        // Activity Priorities
+        Route::get('activity-settings/priorities', [ActivitySettingsApiController::class, 'indexPriorities'])->middleware('permission:crm.read');
+        Route::post('activity-settings/priorities', [ActivitySettingsApiController::class, 'storePriority'])->middleware('permission:crm.edit');
+        Route::get('activity-settings/priorities/{id}', [ActivitySettingsApiController::class, 'showPriority'])->middleware('permission:crm.read');
+        Route::put('activity-settings/priorities/{id}', [ActivitySettingsApiController::class, 'updatePriority'])->middleware('permission:crm.edit');
+        Route::delete('activity-settings/priorities/{id}', [ActivitySettingsApiController::class, 'destroyPriority'])->middleware('permission:crm.delete');
+
+        // Default Activity Duration
+        Route::get('activity-settings/duration', [ActivitySettingsApiController::class, 'getDuration'])->middleware('permission:crm.read');
+        Route::put('activity-settings/duration', [ActivitySettingsApiController::class, 'updateDuration'])->middleware('permission:crm.edit');
 
         // Quotations
         Route::get('quotations/form-options', [QuotationController::class, 'formOptions'])->middleware('permission:crm.read');
@@ -417,6 +541,204 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::post('quotations/{quotation}/send', [QuotationController::class, 'sendEmail'])->middleware('permission:crm.edit');
         Route::post('quotations/{quotation}/update-status', [QuotationController::class, 'updateStatus'])->middleware('permission:crm.edit');
         Route::apiResource('quotations', QuotationController::class)->except(['create', 'edit']);
+
+        // ── Opportunity Management ───────────────────────────────────────────
+        Route::get('opportunities/form-options', [OpportunityApiController::class, 'formOptions'])->middleware('permission:crm.read');
+        Route::get('opportunities/stats', [OpportunityApiController::class, 'stats'])->middleware('permission:crm.read');
+        Route::get('opportunities/pipeline', [OpportunityApiController::class, 'pipeline'])->middleware('permission:crm.read');
+        Route::get('opportunities/kanban', [OpportunityApiController::class, 'pipeline'])->middleware('permission:crm.read');
+
+        // Export Opportunities (Excel, CSV, PDF)
+        Route::get('opportunities/export', [OpportunityApiController::class, 'export'])->middleware('permission:crm.read');
+        Route::get('opportunities/export/excel', [OpportunityApiController::class, 'exportExcel'])->middleware('permission:crm.read');
+        Route::get('opportunities/export/csv', [OpportunityApiController::class, 'exportCsv'])->middleware('permission:crm.read');
+        Route::get('opportunities/export/pdf', [OpportunityApiController::class, 'exportPdf'])->middleware('permission:crm.read');
+
+        // Stage & Quick Actions
+        Route::patch('opportunities/{opportunity}/stage', [OpportunityApiController::class, 'updateStage'])->middleware('permission:crm.edit');
+        Route::post('opportunities/{opportunity}/update-stage', [OpportunityApiController::class, 'updateStage'])->middleware('permission:crm.edit');
+        Route::post('opportunities/{opportunity}/create-quotation', [OpportunityApiController::class, 'createQuotation'])->middleware('permission:crm.edit');
+        Route::post('opportunities/{opportunity}/schedule-activity', [OpportunityApiController::class, 'scheduleActivity'])->middleware('permission:crm.edit');
+
+        // Attachments
+        Route::post('opportunities/{opportunity}/attachments', [OpportunityApiController::class, 'uploadAttachments'])->middleware('permission:crm.edit');
+        Route::delete('opportunities/{opportunity}/attachments/{attachment}', [OpportunityApiController::class, 'deleteAttachment'])->middleware('permission:crm.delete');
+        Route::get('opportunities/{opportunity}/attachments/{attachment}/download', [OpportunityApiController::class, 'downloadAttachment'])->middleware('permission:crm.read');
+
+        // Opportunity Resource Routes
+        Route::get('opportunities', [OpportunityApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('opportunities', [OpportunityApiController::class, 'store'])->middleware('permission:crm.edit');
+        Route::get('opportunities/{opportunity}', [OpportunityApiController::class, 'show'])->middleware('permission:crm.read');
+        Route::put('opportunities/{opportunity}', [OpportunityApiController::class, 'update'])->middleware('permission:crm.edit');
+        Route::delete('opportunities/{opportunity}', [OpportunityApiController::class, 'destroy'])->middleware('permission:crm.delete');
+
+        // ── Opportunity Settings (Stages / Lost Reasons / Win Reasons / Types) ─
+        Route::get('opportunity-settings', [OpportunitySettingsApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('opportunity-settings/seed-defaults', [OpportunitySettingsApiController::class, 'seedDefaults'])->middleware('permission:crm.edit');
+
+        // Opportunity Stages
+        Route::get('opportunity-settings/stages', [OpportunitySettingsApiController::class, 'indexStages'])->middleware('permission:crm.read');
+        Route::post('opportunity-settings/stages', [OpportunitySettingsApiController::class, 'storeStage'])->middleware('permission:crm.edit');
+        Route::get('opportunity-settings/stages/{id}', [OpportunitySettingsApiController::class, 'showStage'])->middleware('permission:crm.read');
+        Route::put('opportunity-settings/stages/{id}', [OpportunitySettingsApiController::class, 'updateStage'])->middleware('permission:crm.edit');
+        Route::delete('opportunity-settings/stages/{id}', [OpportunitySettingsApiController::class, 'destroyStage'])->middleware('permission:crm.delete');
+
+        // Lost Reasons
+        Route::get('opportunity-settings/lost-reasons', [OpportunitySettingsApiController::class, 'indexLostReasons'])->middleware('permission:crm.read');
+        Route::post('opportunity-settings/lost-reasons', [OpportunitySettingsApiController::class, 'storeLostReason'])->middleware('permission:crm.edit');
+        Route::get('opportunity-settings/lost-reasons/{id}', [OpportunitySettingsApiController::class, 'showLostReason'])->middleware('permission:crm.read');
+        Route::put('opportunity-settings/lost-reasons/{id}', [OpportunitySettingsApiController::class, 'updateLostReason'])->middleware('permission:crm.edit');
+        Route::delete('opportunity-settings/lost-reasons/{id}', [OpportunitySettingsApiController::class, 'destroyLostReason'])->middleware('permission:crm.delete');
+
+        // Win Reasons
+        Route::get('opportunity-settings/win-reasons', [OpportunitySettingsApiController::class, 'indexWinReasons'])->middleware('permission:crm.read');
+        Route::post('opportunity-settings/win-reasons', [OpportunitySettingsApiController::class, 'storeWinReason'])->middleware('permission:crm.edit');
+        Route::get('opportunity-settings/win-reasons/{id}', [OpportunitySettingsApiController::class, 'showWinReason'])->middleware('permission:crm.read');
+        Route::put('opportunity-settings/win-reasons/{id}', [OpportunitySettingsApiController::class, 'updateWinReason'])->middleware('permission:crm.edit');
+        Route::delete('opportunity-settings/win-reasons/{id}', [OpportunitySettingsApiController::class, 'destroyWinReason'])->middleware('permission:crm.delete');
+
+        // Opportunity Types
+        Route::get('opportunity-settings/types', [OpportunitySettingsApiController::class, 'indexTypes'])->middleware('permission:crm.read');
+        Route::post('opportunity-settings/types', [OpportunitySettingsApiController::class, 'storeType'])->middleware('permission:crm.edit');
+        Route::get('opportunity-settings/types/{id}', [OpportunitySettingsApiController::class, 'showType'])->middleware('permission:crm.read');
+        Route::put('opportunity-settings/types/{id}', [OpportunitySettingsApiController::class, 'updateType'])->middleware('permission:crm.edit');
+        Route::delete('opportunity-settings/types/{id}', [OpportunitySettingsApiController::class, 'destroyType'])->middleware('permission:crm.delete');
+
+        // ── Proposal Management ──────────────────────────────────────────────
+        Route::get('proposals/form-options', [ProposalApiController::class, 'formOptions'])->middleware('permission:crm.read');
+        Route::post('proposals/{proposal}/update-status', [ProposalApiController::class, 'updateStatus'])->middleware('permission:crm.edit');
+
+        // Export Proposals (Excel, CSV, PDF)
+        Route::get('proposals/export', [ProposalApiController::class, 'export'])->middleware('permission:crm.read');
+        Route::get('proposals/export/excel', [ProposalApiController::class, 'exportExcel'])->middleware('permission:crm.read');
+        Route::get('proposals/export/csv', [ProposalApiController::class, 'exportCsv'])->middleware('permission:crm.read');
+        Route::get('proposals/export/pdf', [ProposalApiController::class, 'exportPdf'])->middleware('permission:crm.read');
+
+        Route::get('proposals', [ProposalApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('proposals', [ProposalApiController::class, 'store'])->middleware('permission:crm.edit');
+        Route::get('proposals/{proposal}', [ProposalApiController::class, 'show'])->middleware('permission:crm.read');
+        Route::put('proposals/{proposal}', [ProposalApiController::class, 'update'])->middleware('permission:crm.edit');
+        Route::delete('proposals/{proposal}', [ProposalApiController::class, 'destroy'])->middleware('permission:crm.delete');
+
+        // ── Products & Services Catalog ──────────────────────────────────────
+        Route::get('products/form-options', [ProductApiController::class, 'formOptions'])->middleware('permission:crm.read');
+        Route::get('products/export', [ProductApiController::class, 'export'])->middleware('permission:crm.read');
+        Route::get('products/export/excel', [ProductApiController::class, 'exportExcel'])->middleware('permission:crm.read');
+        Route::get('products/export/csv', [ProductApiController::class, 'exportCsv'])->middleware('permission:crm.read');
+        Route::get('products/export/pdf', [ProductApiController::class, 'exportPdf'])->middleware('permission:crm.read');
+
+        // Categories management inside products (for "+" button in UI modal & list)
+        Route::get('products/categories', [ProductApiController::class, 'listCategories'])->middleware('permission:crm.read');
+        Route::post('products/categories', [ProductApiController::class, 'storeCategory'])->middleware('permission:crm.edit');
+        Route::put('products/categories/{id}', [ProductApiController::class, 'updateCategory'])->middleware('permission:crm.edit');
+        Route::delete('products/categories/{id}', [ProductApiController::class, 'destroyCategory'])->middleware('permission:crm.delete');
+
+        Route::post('products/{product}/update-status', [ProductApiController::class, 'updateStatus'])->middleware('permission:crm.edit');
+        Route::patch('products/{product}/status', [ProductApiController::class, 'updateStatus'])->middleware('permission:crm.edit');
+        Route::get('products', [ProductApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('products', [ProductApiController::class, 'store'])->middleware('permission:crm.edit');
+        Route::get('products/{product}', [ProductApiController::class, 'show'])->middleware('permission:crm.read');
+        Route::put('products/{product}', [ProductApiController::class, 'update'])->middleware('permission:crm.edit');
+        Route::patch('products/{product}', [ProductApiController::class, 'update'])->middleware('permission:crm.edit');
+        Route::delete('products/{product}', [ProductApiController::class, 'destroy'])->middleware('permission:crm.delete');
+
+        // ── Product Settings (Categories / Units / Currencies / Taxes) ─────────
+        Route::get('product-settings', [ProductSettingsApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('product-settings/seed-defaults', [ProductSettingsApiController::class, 'seedDefaults'])->middleware('permission:crm.edit');
+
+        // Product Categories
+        Route::get('product-settings/categories', [ProductSettingsApiController::class, 'indexCategories'])->middleware('permission:crm.read');
+        Route::post('product-settings/categories', [ProductSettingsApiController::class, 'storeCategory'])->middleware('permission:crm.edit');
+        Route::get('product-settings/categories/{id}', [ProductSettingsApiController::class, 'showCategory'])->middleware('permission:crm.read');
+        Route::put('product-settings/categories/{id}', [ProductSettingsApiController::class, 'updateCategory'])->middleware('permission:crm.edit');
+        Route::delete('product-settings/categories/{id}', [ProductSettingsApiController::class, 'destroyCategory'])->middleware('permission:crm.delete');
+
+        // Units
+        Route::get('product-settings/units', [ProductSettingsApiController::class, 'indexUnits'])->middleware('permission:crm.read');
+        Route::post('product-settings/units', [ProductSettingsApiController::class, 'storeUnit'])->middleware('permission:crm.edit');
+        Route::get('product-settings/units/{id}', [ProductSettingsApiController::class, 'showUnit'])->middleware('permission:crm.read');
+        Route::put('product-settings/units/{id}', [ProductSettingsApiController::class, 'updateUnit'])->middleware('permission:crm.edit');
+        Route::delete('product-settings/units/{id}', [ProductSettingsApiController::class, 'destroyUnit'])->middleware('permission:crm.delete');
+
+        // Currencies
+        Route::get('product-settings/currencies', [ProductSettingsApiController::class, 'indexCurrencies'])->middleware('permission:crm.read');
+        Route::post('product-settings/currencies', [ProductSettingsApiController::class, 'storeCurrency'])->middleware('permission:crm.edit');
+        Route::get('product-settings/currencies/{id}', [ProductSettingsApiController::class, 'showCurrency'])->middleware('permission:crm.read');
+        Route::put('product-settings/currencies/{id}', [ProductSettingsApiController::class, 'updateCurrency'])->middleware('permission:crm.edit');
+        Route::patch('product-settings/currencies/{id}/set-default', [ProductSettingsApiController::class, 'setDefaultCurrency'])->middleware('permission:crm.edit');
+        Route::delete('product-settings/currencies/{id}', [ProductSettingsApiController::class, 'destroyCurrency'])->middleware('permission:crm.delete');
+
+        // Taxes
+        Route::get('product-settings/taxes', [ProductSettingsApiController::class, 'indexTaxes'])->middleware('permission:crm.read');
+        Route::post('product-settings/taxes', [ProductSettingsApiController::class, 'storeTax'])->middleware('permission:crm.edit');
+        Route::get('product-settings/taxes/{id}', [ProductSettingsApiController::class, 'showTax'])->middleware('permission:crm.read');
+        Route::put('product-settings/taxes/{id}', [ProductSettingsApiController::class, 'updateTax'])->middleware('permission:crm.edit');
+        Route::patch('product-settings/taxes/{id}/set-default', [ProductSettingsApiController::class, 'setDefaultTax'])->middleware('permission:crm.edit');
+        Route::delete('product-settings/taxes/{id}', [ProductSettingsApiController::class, 'destroyTax'])->middleware('permission:crm.delete');
+
+        // ── CRM Reports & Analytics Management ────────────────────────────────
+        Route::get('reports/filter-options', [CrmReportApiController::class, 'filterOptions'])->middleware('permission:crm.read');
+
+        // 1. Sales Report
+        Route::get('reports/sales', [CrmReportApiController::class, 'salesReport'])->middleware('permission:crm.read');
+        Route::get('reports/sales/export', [CrmReportApiController::class, 'exportSalesReport'])->middleware('permission:crm.read');
+
+        // 2. Opportunity Report
+        Route::get('reports/opportunity', [CrmReportApiController::class, 'opportunityReport'])->middleware('permission:crm.read');
+        Route::get('reports/opportunity/export', [CrmReportApiController::class, 'exportOpportunityReport'])->middleware('permission:crm.read');
+
+        // 3. Sales Performance Report
+        Route::get('reports/sales-performance', [CrmReportApiController::class, 'salesPerformanceReport'])->middleware('permission:crm.read');
+        Route::get('reports/sales-performance/export', [CrmReportApiController::class, 'exportSalesPerformanceReport'])->middleware('permission:crm.read');
+
+        // 4. Activity Report
+        Route::get('reports/activity', [CrmReportApiController::class, 'activityReport'])->middleware('permission:crm.read');
+        Route::get('reports/activity/export', [CrmReportApiController::class, 'exportActivityReport'])->middleware('permission:crm.read');
+
+        // 5. Quotation Report
+        Route::get('reports/quotation', [CrmReportApiController::class, 'quotationReport'])->middleware('permission:crm.read');
+        Route::get('reports/quotation/export', [CrmReportApiController::class, 'exportQuotationReport'])->middleware('permission:crm.read');
+
+        // 6. Customer Report
+        Route::get('reports/customer', [CrmReportApiController::class, 'customerReport'])->middleware('permission:crm.read');
+        Route::get('reports/customer/export', [CrmReportApiController::class, 'exportCustomerReport'])->middleware('permission:crm.read');
+
+        // 7. Lead Report
+        Route::get('reports/lead', [CrmReportApiController::class, 'leadReport'])->middleware('permission:crm.read');
+        Route::get('reports/lead/export', [CrmReportApiController::class, 'exportLeadReport'])->middleware('permission:crm.read');
+
+        // ── CRM Permissions Settings ─────────────────────────────────────────
+        Route::get('crm-permissions', [CrmPermissionSettingsApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::put('crm-permissions', [CrmPermissionSettingsApiController::class, 'updateBulk'])->middleware('permission:crm.edit');
+        Route::post('crm-permissions/seed-defaults', [CrmPermissionSettingsApiController::class, 'seedDefaults'])->middleware('permission:crm.edit');
+        Route::get('crm-permissions/roles/{roleId}', [CrmPermissionSettingsApiController::class, 'showByRole'])->middleware('permission:crm.read');
+        Route::put('crm-permissions/roles/{roleId}', [CrmPermissionSettingsApiController::class, 'updateByRole'])->middleware('permission:crm.edit');
+
+        // ── Quotation Settings (Currencies / Payment Terms / Taxes) ───────────
+        Route::get('quotation-settings', [QuotationSettingsApiController::class, 'index'])->middleware('permission:crm.read');
+        Route::post('quotation-settings/seed-defaults', [QuotationSettingsApiController::class, 'seedDefaults'])->middleware('permission:crm.edit');
+
+        // Currencies
+        Route::get('quotation-settings/currencies', [QuotationSettingsApiController::class, 'indexCurrencies'])->middleware('permission:crm.read');
+        Route::post('quotation-settings/currencies', [QuotationSettingsApiController::class, 'storeCurrency'])->middleware('permission:crm.edit');
+        Route::get('quotation-settings/currencies/{id}', [QuotationSettingsApiController::class, 'showCurrency'])->middleware('permission:crm.read');
+        Route::put('quotation-settings/currencies/{id}', [QuotationSettingsApiController::class, 'updateCurrency'])->middleware('permission:crm.edit');
+        Route::delete('quotation-settings/currencies/{id}', [QuotationSettingsApiController::class, 'destroyCurrency'])->middleware('permission:crm.delete');
+
+        // Payment Terms
+        Route::get('quotation-settings/payment-terms', [QuotationSettingsApiController::class, 'indexPaymentTerms'])->middleware('permission:crm.read');
+        Route::post('quotation-settings/payment-terms', [QuotationSettingsApiController::class, 'storePaymentTerm'])->middleware('permission:crm.edit');
+        Route::get('quotation-settings/payment-terms/{id}', [QuotationSettingsApiController::class, 'showPaymentTerm'])->middleware('permission:crm.read');
+        Route::put('quotation-settings/payment-terms/{id}', [QuotationSettingsApiController::class, 'updatePaymentTerm'])->middleware('permission:crm.edit');
+        Route::delete('quotation-settings/payment-terms/{id}', [QuotationSettingsApiController::class, 'destroyPaymentTerm'])->middleware('permission:crm.delete');
+
+        // Taxes
+        Route::get('quotation-settings/taxes', [QuotationSettingsApiController::class, 'indexTaxes'])->middleware('permission:crm.read');
+        Route::post('quotation-settings/taxes', [QuotationSettingsApiController::class, 'storeTax'])->middleware('permission:crm.edit');
+        Route::get('quotation-settings/taxes/{id}', [QuotationSettingsApiController::class, 'showTax'])->middleware('permission:crm.read');
+        Route::put('quotation-settings/taxes/{id}', [QuotationSettingsApiController::class, 'updateTax'])->middleware('permission:crm.edit');
+        Route::patch('quotation-settings/taxes/{id}/set-default', [QuotationSettingsApiController::class, 'setDefaultTax'])->middleware('permission:crm.edit');
+        Route::delete('quotation-settings/taxes/{id}', [QuotationSettingsApiController::class, 'destroyTax'])->middleware('permission:crm.delete');
     });
 });
 
@@ -469,6 +791,20 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'employee'], function () {
 
     //Assets
     Route::get('assets/{id}', [AssetApiController::class, 'employeeAssets']);
+
+
+    Route::get('meetings/form-options', [MeetingApiController::class, 'formOptions']);
+    Route::get('meetings/participants/search', [MeetingApiController::class, 'searchParticipants']);
+    Route::patch('meetings/{meeting}/status', [MeetingApiController::class, 'updateStatus']);
+    Route::post('meetings/{meeting}/status', [MeetingApiController::class, 'updateStatus']);
+    Route::get('meetings', [MeetingApiController::class, 'index']);
+    Route::get('my-meetings', [MeetingApiController::class, 'employeeMeetings']);
+    Route::post('meetings', [MeetingApiController::class, 'store']);
+    Route::get('meetings/{meeting}', [MeetingApiController::class, 'show']);
+    Route::put('meetings/{meeting}', [MeetingApiController::class, 'update']);
+    Route::patch('meetings/{meeting}', [MeetingApiController::class, 'update']);
+    Route::delete('meetings/{meeting}', [MeetingApiController::class, 'destroy']);
+
 
     // Profile Settings
     Route::post('change-password', [ProfileApiController::class, 'changePassword']);

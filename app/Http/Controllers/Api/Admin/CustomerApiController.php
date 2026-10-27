@@ -7,6 +7,10 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\CRM\StoreCustomerRequest;
 use App\Http\Requests\CRM\UpdateCustomerRequest;
 use App\Models\Customer;
+use App\Models\CustomerCategory;
+use App\Models\CustomerIndustry;
+use App\Models\CustomerStatus;
+use App\Models\CustomerType;
 use App\Models\Employee;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -49,22 +53,31 @@ class CustomerApiController extends ApiController
                 ];
             });
 
-        $options = [
-            'customer_types' => [
-                'Company',
-                'Individual',
-                'Enterprise',
-                'SMB',
-                'Government',
-            ],
-            'customer_statuses' => [
-                'Active',
-                'Inactive',
-                'Blacklisted',
-                'Prospect',
-                'On Hold',
-            ],
-            'industries' => [
+        try {
+            $customerTypes = CustomerType::orderBy('id')->pluck('name')->toArray();
+            if (empty($customerTypes)) {
+                $customerTypes = CustomerType::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $customerTypes = ['Company', 'Individual', 'Enterprise', 'SMB', 'Government'];
+        }
+
+        try {
+            $customerStatuses = CustomerStatus::orderBy('id')->pluck('name')->toArray();
+            if (empty($customerStatuses)) {
+                $customerStatuses = CustomerStatus::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $customerStatuses = ['Active', 'Inactive', 'Blacklisted', 'Prospect', 'On Hold'];
+        }
+
+        try {
+            $industries = CustomerIndustry::orderBy('id')->pluck('name')->toArray();
+            if (empty($industries)) {
+                $industries = CustomerIndustry::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $industries = [
                 'IT Services & Software',
                 'Healthcare & Medical',
                 'Manufacturing',
@@ -76,15 +89,23 @@ class CustomerApiController extends ApiController
                 'Government',
                 'Services',
                 'Other',
-            ],
-            'customer_categories' => [
-                'Customer',
-                'Reseller',
-                'Distributor',
-                'Partner',
-                'VIP',
-                'Corporate',
-            ],
+            ];
+        }
+
+        try {
+            $customerCategories = CustomerCategory::orderBy('id')->pluck('name')->toArray();
+            if (empty($customerCategories)) {
+                $customerCategories = CustomerCategory::DEFAULTS;
+            }
+        } catch (\Throwable $e) {
+            $customerCategories = ['Customer', 'Reseller', 'Distributor', 'Partner', 'VIP', 'Corporate'];
+        }
+
+        $options = [
+            'customer_types' => $customerTypes,
+            'customer_statuses' => $customerStatuses,
+            'industries' => $industries,
+            'customer_categories' => $customerCategories,
             'customer_sources' => [
                 'Website',
                 'Referral',
