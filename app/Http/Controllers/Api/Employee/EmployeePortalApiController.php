@@ -784,23 +784,23 @@ class EmployeePortalApiController extends ApiController
         $breaks = $attendanceLogs->flatMap(function ($log) {
             return $log->breaks->map(function ($break) use ($log) {
                 return [
-                    'id'                => $break->id,
+                    'id' => $break->id,
                     'attendance_log_id' => $log->id,
-                    'date'              => $log->log_date,
-                    'start_time'        => $break->start_time ? Carbon::parse($break->start_time)->format('h:i A') : null,
-                    'end_time'          => $break->end_time ? Carbon::parse($break->end_time)->format('h:i A') : null,
+                    'date' => $log->log_date,
+                    'start_time' => $break->start_time ? Carbon::parse($break->start_time)->format('h:i A') : null,
+                    'end_time' => $break->end_time ? Carbon::parse($break->end_time)->format('h:i A') : null,
                     // 'start_time'        => $break->start_time,
                     // 'end_time'          => $break->end_time,
-                    'duration_minutes'  => (int) ($break->duration_minutes ?? 0),
-                    'is_ongoing'        => is_null($break->end_time),
-                    'created_at'        => $break->created_at,
-                    'updated_at'        => $break->updated_at,
+                    'duration_minutes' => (int) ($break->duration_minutes ?? 0),
+                    'is_ongoing' => is_null($break->end_time),
+                    'created_at' => $break->created_at,
+                    'updated_at' => $break->updated_at,
                 ];
             });
         })->values();
 
         return $this->success([
-            'breaks'              => $breaks,
+            'breaks' => $breaks,
             'total_break_minutes' => $breaks->sum('duration_minutes'),
         ]);
     }
@@ -848,17 +848,17 @@ class EmployeePortalApiController extends ApiController
             }
 
             return [
-                'id'                   => $break->id,
-                'attendance_log_id'    => $break->attendance_log_id,
-                'start_time'           => $break->start_time ? Carbon::parse($break->start_time)->setTimezone($tz)->format('Y-m-d H:i:s') : null,
+                'id' => $break->id,
+                'attendance_log_id' => $break->attendance_log_id,
+                'start_time' => $break->start_time ? Carbon::parse($break->start_time)->setTimezone($tz)->format('Y-m-d H:i:s') : null,
                 'start_time_formatted' => $break->start_time ? Carbon::parse($break->start_time)->setTimezone($tz)->format('h:i A') : null,
-                'end_time'             => $break->end_time ? Carbon::parse($break->end_time)->setTimezone($tz)->format('Y-m-d H:i:s') : null,
-                'end_time_formatted'   => $break->end_time ? Carbon::parse($break->end_time)->setTimezone($tz)->format('h:i A') : null,
-                'duration_minutes'     => $bMinutes,
-                'formatted_duration'   => $formattedDuration,
-                'is_ongoing'           => is_null($break->end_time),
-                'created_at'           => $break->created_at,
-                'updated_at'           => $break->updated_at,
+                'end_time' => $break->end_time ? Carbon::parse($break->end_time)->setTimezone($tz)->format('Y-m-d H:i:s') : null,
+                'end_time_formatted' => $break->end_time ? Carbon::parse($break->end_time)->setTimezone($tz)->format('h:i A') : null,
+                'duration_minutes' => $bMinutes,
+                'formatted_duration' => $formattedDuration,
+                'is_ongoing' => is_null($break->end_time),
+                'created_at' => $break->created_at,
+                'updated_at' => $break->updated_at,
             ];
         });
 
@@ -870,16 +870,16 @@ class EmployeePortalApiController extends ApiController
             : ($tbHours == 0 ? "{$tbMins} mins" : ($tbMins == 0 ? "{$tbHours} hrs" : "{$tbHours} hrs {$tbMins} mins"));
 
         return $this->success([
-            'attendance_log_id'     => $attendance->id,
-            'log_date'              => $attendance->log_date,
-            'punch_in'              => $attendance->punch_in ? Carbon::parse($attendance->punch_in)->setTimezone($tz)->format('h:i A') : '--',
-            'punch_out'             => $attendance->punch_out ? Carbon::parse($attendance->punch_out)->setTimezone($tz)->format('h:i A') : '--',
-            'breaks'                => $breaks,
-            'total_breaks_count'    => $breaks->count(),
-            'total_break_minutes'   => $totalBreakMinutes,
+            'attendance_log_id' => $attendance->id,
+            'log_date' => $attendance->log_date,
+            'punch_in' => $attendance->punch_in ? Carbon::parse($attendance->punch_in)->setTimezone($tz)->format('h:i A') : '--',
+            'punch_out' => $attendance->punch_out ? Carbon::parse($attendance->punch_out)->setTimezone($tz)->format('h:i A') : '--',
+            'breaks' => $breaks,
+            'total_breaks_count' => $breaks->count(),
+            'total_break_minutes' => $totalBreakMinutes,
             'total_break_formatted' => $totalBreakFormatted,
-            'excess_break_minutes'  => max(0, $totalBreakMinutes - 60),
-            'has_active_break'      => $breaks->contains('is_ongoing', true),
+            'excess_break_minutes' => max(0, $totalBreakMinutes - 60),
+            'has_active_break' => $breaks->contains('is_ongoing', true),
         ], 'Attendance breaks retrieved successfully.');
     }
 
@@ -981,12 +981,28 @@ class EmployeePortalApiController extends ApiController
             'session1' => 'nullable|in:morning,afternoon',
             'session2' => 'nullable|in:morning,afternoon',
             'employee_id' => 'nullable',
+            'status' => 'nullable|in:pending,approved,rejected',
         ]);
+
+        $user = auth('api')->user();
+
+        // Check if user is HR / Admin or has leaves.edit permission
+        $isHrOrAdmin = false;
+        if ($user) {
+            $roleName = strtolower($user->role->name ?? '');
+            $userType = strtolower($user->type ?? '');
+            if (
+                preg_match('/(admin|hr)/i', $roleName) ||
+                preg_match('/(admin|hr)/i', $userType) ||
+                (method_exists($user, 'hasPermission') && $user->hasPermission('leaves', 'edit'))
+            ) {
+                $isHrOrAdmin = true;
+            }
+        }
 
         if ($request->filled('employee_id')) {
             $employee = Employee::find($request->employee_id);
         } else {
-            $user = auth('api')->user();
             $employee = $user ? $user->employee : null;
         }
 
@@ -994,23 +1010,25 @@ class EmployeePortalApiController extends ApiController
             return $this->error('Employee profile not found', 404);
         }
 
-        // Check if there are overlapping leaves considering session1 and session2
-        $hasOverlap = $this->hasOverlappingLeave(
-            $employee->id,
-            $request->start_date,
-            $request->end_date,
-            $request->session1,
-            $request->session2
-        );
+        // Check if there are overlapping leaves considering session1 and session2 (bypass for HR/Admin if needed)
+        if (!$isHrOrAdmin) {
+            $hasOverlap = $this->hasOverlappingLeave(
+                $employee->id,
+                $request->start_date,
+                $request->end_date,
+                $request->session1,
+                $request->session2
+            );
 
-        if ($hasOverlap) {
-            return $this->error('You have already applied/taken leave on the selected date(s) and session(s).', 422);
+            if ($hasOverlap) {
+                return $this->error('You have already applied/taken leave on the selected date(s) and session(s).', 422);
+            }
         }
 
         $leaveType = LeaveType::find($request->leave_type_id);
 
-        // Check for sick leave document
-        if ($leaveType && str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document')) {
+        // Check for sick leave document (employees only)
+        if (!$isHrOrAdmin && $leaveType && str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document')) {
             return $this->error('Medical certificate is required for sick leave', 422);
         }
 
@@ -1096,13 +1114,34 @@ class EmployeePortalApiController extends ApiController
                 'claim_salary' => false,
                 'document' => $documentPath,
                 'reason' => $request->reason,
-                'status' => 'pending',
+                'status' => $request->status ?? 'pending',
+                'approved_by' => ($isHrOrAdmin && ($request->status ?? '') === 'approved') ? $user->id : null,
             ]);
 
             return $this->success($leave, 'LOP leave request submitted successfully', 201);
         }
 
-        // Non-LOP category leave balance check - cumulative carry-forward across all years
+        // HR / Admin Role Bypass: allow creating leave directly without probation/balance restrictions
+        if ($isHrOrAdmin) {
+            $leave = LeaveRequest::create([
+                'employee_id' => $employee->id,
+                'leave_type_id' => $request->leave_type_id,
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+                'session1' => $session1,
+                'session2' => $session2,
+                'duration_days' => $durationDays,
+                'claim_salary' => $request->claim_salary ?? false,
+                'document' => $documentPath,
+                'reason' => $request->reason,
+                'status' => $request->status ?? 'pending',
+                'approved_by' => ($request->status ?? '') === 'approved' ? $user->id : null,
+            ]);
+
+            return $this->success($leave->load(['leaveType', 'employee']), 'Leave request created successfully by HR/Admin.', 201);
+        }
+
+        // Non-LOP category leave balance check - cumulative carry-forward across all years (Regular Employees)
         $allocated = (float) LeaveAllocation::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
             ->sum('allocated_days');
@@ -1125,30 +1164,20 @@ class EmployeePortalApiController extends ApiController
         if ($probationStart && $probationEnd) {
             $leaveStart = Carbon::parse($request->start_date)->startOfDay();
 
-            // Check if the leave falls within the 3-month probation period
+            // Check if the leave falls within the probation period
             if ($leaveStart->lte($probationEnd) && $leaveStart->gte($probationStart)) {
                 $monthIndex = (int) $probationStart->diffInMonths($leaveStart);
 
                 if ($monthIndex === 0) {
                     // Month 1 of probation: 0 paid leaves allowed. Total will be LOP if leave is taken.
                     $remainingBalance = 0;
-                } elseif ($monthIndex === 1) {
-                    // Month 2 of probation: 1 leave allowed (deducted from earned balance), rest is LOP
-                    $mStart = $probationStart->copy()->addMonth();
-                    $mEnd = $probationStart->copy()->addMonths(2)->subDay()->endOfDay();
-
-                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
-                        ->where('leave_type_id', $request->leave_type_id)
-                        ->whereIn('status', ['approved', 'pending'])
-                        ->whereDate('start_date', '<=', $mEnd)
-                        ->whereDate('start_date', '>=', $mStart)
-                        ->sum('duration_days');
-
-                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
                 } else {
-                    // Month 3 of probation: 1 leave allowed (deducted from earned balance), rest is LOP
-                    $mStart = $probationStart->copy()->addMonths(2);
-                    $mEnd = $probationEnd;
+                    // Month 2 onwards during probation: max 1.0 paid leave allowed per month
+                    $mStart = $probationStart->copy()->addMonths($monthIndex);
+                    $mEnd = $probationStart->copy()->addMonths($monthIndex + 1)->subSecond();
+                    if ($mEnd->gt($probationEnd)) {
+                        $mEnd = $probationEnd;
+                    }
 
                     $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
                         ->where('leave_type_id', $request->leave_type_id)
@@ -1248,27 +1277,51 @@ class EmployeePortalApiController extends ApiController
             'session1' => 'nullable|in:morning,afternoon',
             'session2' => 'nullable|in:morning,afternoon',
             'employee_id' => 'nullable',
+            'status' => 'nullable|in:pending,approved,rejected',
         ]);
 
-        if ($request->filled('employee_id')) {
-            $employee = Employee::find($request->employee_id);
-        } else {
-            $user = auth('api')->user();
-            $employee = $user ? $user->employee : null;
+        $user = auth('api')->user();
+
+        // Check if user is HR / Admin or has leaves.edit permission
+        $isHrOrAdmin = false;
+        if ($user) {
+            $roleName = strtolower($user->role->name ?? '');
+            $userType = strtolower($user->type ?? '');
+            if (
+                preg_match('/(admin|hr)/i', $roleName) ||
+                preg_match('/(admin|hr)/i', $userType) ||
+                (method_exists($user, 'hasPermission') && $user->hasPermission('leaves', 'edit'))
+            ) {
+                $isHrOrAdmin = true;
+            }
         }
 
-        if (!$employee)
+        if ($isHrOrAdmin) {
+            $leave = LeaveRequest::find($id);
+            if (!$leave) {
+                return $this->error('Leave request not found', 404);
+            }
+            $employee = $request->filled('employee_id')
+                ? (Employee::find($request->employee_id) ?? $leave->employee)
+                : $leave->employee;
+        } else {
+            $employee = $user ? $user->employee : null;
+            if (!$employee) {
+                return $this->error('Employee profile not found', 404);
+            }
+            $leave = LeaveRequest::where('employee_id', $employee->id)->find($id);
+            if (!$leave) {
+                return $this->error('Leave request not found', 404);
+            }
+        }
+
+        if (!$employee) {
             return $this->error('Employee profile not found', 404);
-
-        $leave = LeaveRequest::where('employee_id', $employee->id)->find($id);
-
-        if (!$leave) {
-            return $this->error('Leave request not found', 404);
         }
 
         $leaveType = LeaveType::find($request->leave_type_id);
 
-        if ($leaveType && str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document') && !$leave->document) {
+        if (!$isHrOrAdmin && $leaveType && str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document') && !$leave->document) {
             return $this->error('Medical certificate is required for sick leave', 422);
         }
 
@@ -1286,18 +1339,20 @@ class EmployeePortalApiController extends ApiController
             ]);
         }
 
-        // Check if there are overlapping leaves considering session1 and session2 (excluding this leave request)
-        $hasOverlap = $this->hasOverlappingLeave(
-            $employee->id,
-            $request->start_date,
-            $request->end_date,
-            $request->session1,
-            $request->session2,
-            $leave->id
-        );
+        // Check overlapping leaves for regular employees
+        if (!$isHrOrAdmin) {
+            $hasOverlap = $this->hasOverlappingLeave(
+                $employee->id,
+                $request->start_date,
+                $request->end_date,
+                $request->session1,
+                $request->session2,
+                $leave->id
+            );
 
-        if ($hasOverlap) {
-            return $this->error('You have already applied/taken leave on the selected date(s) and session(s).', 422);
+            if ($hasOverlap) {
+                return $this->error('You have already applied/taken leave on the selected date(s) and session(s).', 422);
+            }
         }
 
         $start = Carbon::parse($request->start_date);
@@ -1354,6 +1409,38 @@ class EmployeePortalApiController extends ApiController
             $documentPath = $request->file('document')->store('leaves/documents', 'public');
         }
 
+        // =========================================================================
+        // HR / Admin Role Bypass:
+        // Allow HR/Admin to change leave type directly without probation or balance guards
+        // =========================================================================
+        if ($isHrOrAdmin) {
+            $updateData = [
+                'leave_type_id' => $request->leave_type_id,
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+                'session1' => $session1,
+                'session2' => $session2,
+                'duration_days' => $durationDays,
+                'claim_salary' => $request->claim_salary ?? false,
+                'document' => $documentPath,
+                'reason' => $request->reason,
+            ];
+
+            if ($request->filled('status')) {
+                $updateData['status'] = $request->status;
+                if ($request->status === 'approved' && empty($leave->approved_by)) {
+                    $updateData['approved_by'] = $user->id;
+                }
+            }
+
+            $leave->update($updateData);
+
+            return $this->success($leave->load(['leaveType', 'employee']), 'Leave request updated successfully by HR/Admin.');
+        }
+
+        // =========================================================================
+        // Regular Employee Flow (Subject to probation and balance guards)
+        // =========================================================================
         $isLop = ($leaveType && ($leaveType->id == $lopLeaveType->id || preg_match('/(lop|loss of pay|unpaid)/i', $leaveType->name)));
 
         if ($isLop) {
@@ -1396,31 +1483,20 @@ class EmployeePortalApiController extends ApiController
         if ($probationStart && $probationEnd) {
             $leaveStart = Carbon::parse($request->start_date)->startOfDay();
 
-            // Check if the leave falls within the 3-month probation period
+            // Check if the leave falls within the probation period
             if ($leaveStart->lte($probationEnd) && $leaveStart->gte($probationStart)) {
                 $monthIndex = (int) $probationStart->diffInMonths($leaveStart);
 
                 if ($monthIndex === 0) {
                     // Month 1 of probation: 0 paid leaves allowed. Total will be LOP if leave is taken.
                     $remainingBalance = 0;
-                } elseif ($monthIndex === 1) {
-                    // Month 2 of probation: 1 leave allowed, rest is LOP
-                    $mStart = $probationStart->copy()->addMonth();
-                    $mEnd = $probationStart->copy()->addMonths(2)->subDay()->endOfDay();
-
-                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
-                        ->where('leave_type_id', $request->leave_type_id)
-                        ->whereIn('status', ['approved', 'pending'])
-                        ->where('id', '!=', $leave->id)
-                        ->whereDate('start_date', '<=', $mEnd)
-                        ->whereDate('start_date', '>=', $mStart)
-                        ->sum('duration_days');
-
-                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
                 } else {
-                    // Month 3 of probation: 1 leave allowed (deducted from earned balance), rest is LOP
-                    $mStart = $probationStart->copy()->addMonths(2);
-                    $mEnd = $probationEnd;
+                    // Month 2 onwards during probation: max 1.0 paid leave allowed per month
+                    $mStart = $probationStart->copy()->addMonths($monthIndex);
+                    $mEnd = $probationStart->copy()->addMonths($monthIndex + 1)->subSecond();
+                    if ($mEnd->gt($probationEnd)) {
+                        $mEnd = $probationEnd;
+                    }
 
                     $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
                         ->where('leave_type_id', $request->leave_type_id)
@@ -1441,23 +1517,22 @@ class EmployeePortalApiController extends ApiController
             $lopDetails = $split['lop'];
 
             $lopLeave = null;
-            if (!empty($lopDetails) && ($lopDetails['duration_days'] ?? 0) > 0) {
-                $lopLeave = LeaveRequest::create([
-                    'employee_id' => $employee->id,
-                    'leave_type_id' => $lopLeaveType->id,
-                    'start_date' => $lopDetails['start_date'],
-                    'end_date' => $lopDetails['end_date'],
-                    'session1' => $lopDetails['session1'],
-                    'session2' => $lopDetails['session2'],
-                    'duration_days' => $lopDetails['duration_days'],
-                    'claim_salary' => false,
-                    'document' => $documentPath,
-                    'reason' => $request->reason . ' (Auto-split LOP)',
-                    'status' => 'pending',
-                ]);
-            }
-
             if (!empty($bucketDetails) && ($bucketDetails['duration_days'] ?? 0) > 0) {
+                if (!empty($lopDetails) && ($lopDetails['duration_days'] ?? 0) > 0) {
+                    $lopLeave = LeaveRequest::create([
+                        'employee_id' => $employee->id,
+                        'leave_type_id' => $lopLeaveType->id,
+                        'start_date' => $lopDetails['start_date'],
+                        'end_date' => $lopDetails['end_date'],
+                        'session1' => $lopDetails['session1'],
+                        'session2' => $lopDetails['session2'],
+                        'duration_days' => $lopDetails['duration_days'],
+                        'claim_salary' => false,
+                        'document' => $documentPath,
+                        'reason' => $request->reason . ' (Auto-split LOP)',
+                    ]);
+                }
+
                 $leave->update([
                     'leave_type_id' => $request->leave_type_id,
                     'start_date' => $bucketDetails['start_date'],
@@ -1475,7 +1550,7 @@ class EmployeePortalApiController extends ApiController
                     'lop_leave' => $lopLeave,
                 ], "Leave request updated successfully. {$bucketDetails['duration_days']} day(s) allocated to {$leaveType->name} and " . ($lopLeave ? $lopDetails['duration_days'] : 0) . " day(s) created under LOP.");
             } else {
-                // If 0 paid days allowed, update the existing request itself as LOP
+                // If 0 paid days allowed, update the existing request itself as LOP (DO NOT create duplicate record)
                 $leave->update([
                     'leave_type_id' => $lopLeaveType->id,
                     'start_date' => $request->start_date,
@@ -1510,6 +1585,31 @@ class EmployeePortalApiController extends ApiController
     public function destroyLeave($id): JsonResponse
     {
         $user = auth('api')->user();
+
+        $isHrOrAdmin = false;
+        if ($user) {
+            $roleName = strtolower($user->role->name ?? '');
+            $userType = strtolower($user->type ?? '');
+            if (
+                preg_match('/(admin|hr)/i', $roleName) ||
+                preg_match('/(admin|hr)/i', $userType) ||
+                (method_exists($user, 'hasPermission') && $user->hasPermission('leaves', 'delete')) ||
+                (method_exists($user, 'hasPermission') && $user->hasPermission('leaves', 'edit'))
+            ) {
+                $isHrOrAdmin = true;
+            }
+        }
+
+        if ($isHrOrAdmin) {
+            $leave = LeaveRequest::find($id);
+            if (!$leave) {
+                return $this->error('Leave request not found', 404);
+            }
+
+            $leave->delete();
+            return $this->success(null, 'Leave request deleted successfully by HR/Admin');
+        }
+
         $employee = $user ? $user->employee : null;
         if (!$employee)
             return $this->error('Employee profile not found', 404);
