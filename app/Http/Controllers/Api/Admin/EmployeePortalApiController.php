@@ -431,123 +431,7 @@ class EmployeePortalApiController extends ApiController
             return $this->success($leave, 'LOP leave request submitted successfully', 201);
         }
 
-        // Non-LOP category leave balance check - cumulative carry-forward across all years
-        $allocated = (float) LeaveAllocation::where('employee_id', $employee->id)
-            ->where('leave_type_id', $request->leave_type_id)
-            ->sum('allocated_days');
-
-        $leavesTaken = (float) LeaveRequest::where('employee_id', $employee->id)
-            ->where('leave_type_id', $request->leave_type_id)
-            ->where('status', 'approved')
-            ->sum('duration_days');
-
-        $remainingBalance = max(0, $allocated - $leavesTaken);
-
-        $probationStart = $employee->probation_start_date
-            ? Carbon::parse($employee->probation_start_date)->startOfDay()
-            : ($employee->joining_date ? Carbon::parse($employee->joining_date)->startOfDay() : null);
-
-        $probationEnd = $employee->probation_end_date
-            ? Carbon::parse($employee->probation_end_date)->endOfDay()
-            : ($probationStart ? $probationStart->copy()->addMonths(3)->subDay()->endOfDay() : null);
-
-        if ($probationStart && $probationEnd) {
-            $leaveStart = Carbon::parse($request->start_date)->startOfDay();
-
-            // Check if the leave falls within the 3-month probation period
-            if ($leaveStart->lte($probationEnd) && $leaveStart->gte($probationStart)) {
-                $monthIndex = (int) $probationStart->diffInMonths($leaveStart);
-
-                if ($monthIndex === 0) {
-                    // Month 1 of probation: 0 paid leaves allowed. Total will be LOP if leave is taken.
-                    $remainingBalance = 0;
-                } elseif ($monthIndex === 1) {
-                    // Month 2 of probation: 1 leave allowed, rest is LOP
-                    $mStart = $probationStart->copy()->addMonth();
-                    $mEnd = $probationStart->copy()->addMonths(2)->subDay()->endOfDay();
-
-                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
-                        ->where('leave_type_id', $request->leave_type_id)
-                        ->whereIn('status', ['approved', 'pending'])
-                        ->whereDate('start_date', '<=', $mEnd)
-                        ->whereDate('start_date', '>=', $mStart)
-                        ->sum('duration_days');
-
-                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
-                } else {
-                    // Month 3 of probation: 1 leave allowed (deducted from earned balance), rest is LOP
-                    $mStart = $probationStart->copy()->addMonths(2);
-                    $mEnd = $probationEnd;
-
-                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
-                        ->where('leave_type_id', $request->leave_type_id)
-                        ->whereIn('status', ['approved', 'pending'])
-                        ->whereDate('start_date', '<=', $mEnd)
-                        ->whereDate('start_date', '>=', $mStart)
-                        ->sum('duration_days');
-
-                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
-                }
-            }
-        }
-
-        if ($durationDays > $remainingBalance) {
-            $split = $this->splitLeaveIntoSlots($start, $end, $session1, $session2, $remainingBalance);
-            $bucketDetails = $split['bucket'];
-            $lopDetails = $split['lop'];
-
-            $bucketLeave = null;
-            if (!empty($bucketDetails) && ($bucketDetails['duration_days'] ?? 0) > 0) {
-                $bucketLeave = LeaveRequest::create([
-                    'employee_id' => $employee->id,
-                    'leave_type_id' => $request->leave_type_id,
-                    'start_date' => $bucketDetails['start_date'],
-                    'end_date' => $bucketDetails['end_date'],
-                    'session1' => $bucketDetails['session1'],
-                    'session2' => $bucketDetails['session2'],
-                    'duration_days' => $bucketDetails['duration_days'],
-                    'claim_salary' => $request->claim_salary ?? false,
-                    'document' => $documentPath,
-                    'reason' => $request->reason,
-                    'status' => 'pending',
-                ]);
-            }
-
-            $lopLeave = null;
-            if (!empty($lopDetails) && ($lopDetails['duration_days'] ?? 0) > 0) {
-                $lopLeave = LeaveRequest::create([
-                    'employee_id' => $employee->id,
-                    'leave_type_id' => $lopLeaveType->id,
-                    'start_date' => $lopDetails['start_date'],
-                    'end_date' => $lopDetails['end_date'],
-                    'session1' => $lopDetails['session1'],
-                    'session2' => $lopDetails['session2'],
-                    'duration_days' => $lopDetails['duration_days'],
-                    'claim_salary' => false,
-                    'document' => $documentPath,
-                    'reason' => $request->reason . ($bucketLeave ? ' (Auto-split LOP)' : ' (LOP)'),
-                    'status' => 'pending',
-                ]);
-            }
-
-            if ($bucketLeave && $lopLeave) {
-                $msg = "Leave request submitted successfully. {$bucketDetails['duration_days']} day(s) deducted from {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.";
-            } elseif ($lopLeave) {
-                $msg = "Leave request submitted successfully under LOP ({$lopDetails['duration_days']} day(s)).";
-            } else {
-                $msg = "Leave request submitted successfully.";
-            }
-
-            return $this->success(
-                [
-                    'leave' => $bucketLeave ?? $lopLeave,
-                    'lop_leave' => $bucketLeave ? $lopLeave : null,
-                ],
-                $msg,
-                201
-            );
-        }
-
+        // Admin role: bypass probation and balance guards to allow assigning the requested leave type directly
         $leave = LeaveRequest::create([
             'employee_id' => $employee->id,
             'leave_type_id' => $request->leave_type_id,
@@ -559,10 +443,11 @@ class EmployeePortalApiController extends ApiController
             'claim_salary' => $request->claim_salary ?? false,
             'document' => $documentPath,
             'reason' => $request->reason,
-            'status' => 'pending',
+            'status' => $request->status ?? 'pending',
+            'approved_by' => ($request->status ?? '') === 'approved' ? auth('api')->id() : null,
         ]);
 
-        return $this->success($leave, 'Leave request submitted successfully', 201);
+        return $this->success($leave->load(['leaveType', 'employee']), 'Leave request created successfully by Admin.', 201);
     }
 
     /**
