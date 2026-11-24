@@ -119,17 +119,15 @@ class EmployeePortalApiController extends ApiController
             });
         }
 
-        // Leave stats
-        $totalLeavesTaken = LeaveRequest::where('employee_id', $user->employee->id)
+        // Leave stats - cumulative carry-forward across years
+        $totalLeavesTaken = (float) LeaveRequest::where('employee_id', $user->employee->id)
             ->where('status', 'approved')
-            ->whereYear('start_date', date('Y'))
             ->sum('duration_days');
 
-        $totalAllocatedDays = LeaveAllocation::where('employee_id', $employee->id)
-            ->whereYear('year', date('Y'))
+        $totalAllocatedDays = (float) LeaveAllocation::where('employee_id', $employee->id)
             ->sum('allocated_days');
 
-        $leaveBalance = $totalAllocatedDays - $totalLeavesTaken;
+        $leaveBalance = max(0, $totalAllocatedDays - $totalLeavesTaken);
 
         // Punch Access Logic
         $canPunch = true;
@@ -520,6 +518,7 @@ class EmployeePortalApiController extends ApiController
             'punch_in_latitude' => 'nullable|numeric',
             'punch_in_longitude' => 'nullable|numeric',
             'punch_in_address' => 'nullable|string',
+            'timezone' => 'nullable'
         ]);
         $user = auth('api')->user();
         $employee = $user ? $user->employee : null;
@@ -546,17 +545,19 @@ class EmployeePortalApiController extends ApiController
             return $this->error('Already punched in today.', 400);
         }
 
+        $timezone = $request->timezone;
+
         $log = AttendanceLog::create([
             // 'company_id' => $user->company_id ?? 1,
             'userid' => $user->id,
-            'log_date' => $today,
-            'punch_in' => Carbon::now(),
+            'log_date' => Carbon::now($timezone)->toDateString(),
+            'punch_in' => Carbon::now($timezone),
             'status' => 1,
             'log_status' => 'IN',
             'punch_in_latitude' => $request->punch_in_latitude,
             'punch_in_longitude' => $request->punch_in_longitude,
             'punch_in_address' => $request->punch_in_address,
-
+            'timezone' => $request->timezone
         ]);
 
         return $this->success($log, 'Punched in successfully.', 201);
@@ -576,7 +577,8 @@ class EmployeePortalApiController extends ApiController
             'plan_tomorrow' => 'nullable|string',
             'remarks' => 'nullable|string',
             'punch_out_time' => 'nullable|date',
-            'is_overtime' => 'nullable|boolean'
+            'is_overtime' => 'nullable|boolean',
+            'timezone' => 'nullable'
         ]);
 
         $user = auth('api')->user();
@@ -600,12 +602,16 @@ class EmployeePortalApiController extends ApiController
         if (!$log) {
             return $this->error('No active punch-in found.', 400);
         }
+        $timezone = $request->timezone;
+        $log_timezone = $log->timezone ?? $timezone;
 
         $attendanceDate = Carbon::parse($log->log_date)->toDateString();
-        $punchOutTime = Carbon::parse($request->punch_out_time);
+        $punchOutTime = !empty($request->punch_out_time)
+            ? Carbon::parse($request->punch_out_time, $log_timezone)
+            : Carbon::now($log_timezone);
 
         //calculation of working hours
-        $punchIn = Carbon::parse($log->punch_in);
+        $punchIn = Carbon::parse($log->punch_in, $log_timezone);
         $totalMinutes = $punchIn->diffInMinutes($punchOutTime);
         $breakMinutes = (int) $log->breaks()->sum('duration_minutes');
         $excessBreakMinutes = max(0, $breakMinutes - 60);
@@ -613,16 +619,21 @@ class EmployeePortalApiController extends ApiController
 
         // Validate punch out date matches attendance date
         if ($punchOutTime->toDateString() !== $attendanceDate) {
-            return $this->error(
-                "Punch out time must belong to the attendance date {$attendanceDate}.",
-                422
-            );
+            if ($punchOutTime->toDateString() !== $attendanceDate) {
+                return $this->error(
+                    "Punch out time ({$punchOutTime->toDateString()}) must belong to the attendance date ({$attendanceDate}).",
+                    422
+                );
+            }
         }
 
+
         // Ensure punch out is after punch in
-        if ($log->punch_in && $punchOutTime->lt(Carbon::parse($log->punch_in))) {
+        if ($punchOutTime->lt($punchIn)) {
             return $this->error(
-                'Punch out time cannot be earlier than punch in time.',
+                'Punch out time cannot be earlier than punch in time. ' .
+                'Punch In: ' . $punchIn->format('Y-m-d H:i:s') .
+                ' | Punch Out: ' . $punchOutTime->format('Y-m-d H:i:s'),
                 422
             );
         }
@@ -688,7 +699,7 @@ class EmployeePortalApiController extends ApiController
             return $this->error('You are already on a break.', 400);
         }
 
-        $timezone = $request->input('timezone', config('app.timezone'));
+        $timezone = $request->input('timezone', $log->timezone);
 
         $break = $log->breaks()->create([
             'start_time' => Carbon::now($timezone),
@@ -721,9 +732,16 @@ class EmployeePortalApiController extends ApiController
             return $this->error('You are not currently on a break.', 400);
         }
 
-        $timezone = $request->input('timezone', config('app.timezone'));
+        $timezone = $request->input('timezone', $log->timezone);
         $now = Carbon::now($timezone);
-        $durationInSeconds = $activeBreak->start_time->diffInSeconds($now);
+
+        $startTime = Carbon::parse(
+            $activeBreak->getRawOriginal('start_time'),
+            $timezone
+        );
+
+        $durationInSeconds = $startTime->diffInSeconds($now);
+
         $duration = (int) ceil($durationInSeconds / 60);
 
         $activeBreak->update([
@@ -745,10 +763,16 @@ class EmployeePortalApiController extends ApiController
             return $this->error('Employee profile not found', 404);
         }
 
-        $attendanceLogs = AttendanceLog::with('breaks')
-            ->where('userid', $user->id)
-            ->orderBy('log_date', 'desc')
-            ->get();
+        $query = AttendanceLog::with('breaks')
+            ->where('userid', $user->id);
+
+        if ($request->filled('attendance_id')) {
+            $query->where('id', $request->attendance_id);
+        } elseif ($request->filled('attendance_log_id')) {
+            $query->where('id', $request->attendance_log_id);
+        }
+
+        $attendanceLogs = $query->orderBy('log_date', 'desc')->get();
 
         if ($attendanceLogs->isEmpty()) {
             return $this->success([
@@ -760,22 +784,103 @@ class EmployeePortalApiController extends ApiController
         $breaks = $attendanceLogs->flatMap(function ($log) {
             return $log->breaks->map(function ($break) use ($log) {
                 return [
-                    'id' => $break->id,
+                    'id'                => $break->id,
                     'attendance_log_id' => $log->id,
-                    'date' => $log->log_date,
-                    'start_time' => $break->start_time,
-                    'end_time' => $break->end_time,
-                    'duration_minutes' => $break->duration_minutes,
-                    'created_at' => $break->created_at,
-                    'updated_at' => $break->updated_at,
+                    'date'              => $log->log_date,
+                    'start_time'        => $break->start_time ? Carbon::parse($break->start_time)->format('h:i A') : null,
+                    'end_time'          => $break->end_time ? Carbon::parse($break->end_time)->format('h:i A') : null,
+                    // 'start_time'        => $break->start_time,
+                    // 'end_time'          => $break->end_time,
+                    'duration_minutes'  => (int) ($break->duration_minutes ?? 0),
+                    'is_ongoing'        => is_null($break->end_time),
+                    'created_at'        => $break->created_at,
+                    'updated_at'        => $break->updated_at,
                 ];
             });
         })->values();
 
         return $this->success([
-            'breaks' => $breaks,
+            'breaks'              => $breaks,
             'total_break_minutes' => $breaks->sum('duration_minutes'),
         ]);
+    }
+
+    /**
+     * Get Breaks for a specific attendance ID (Employee View)
+     */
+    public function getAttendanceBreaks($attendanceId, Request $request): JsonResponse
+    {
+        $user = auth('api')->user();
+
+        if (!$user) {
+            return $this->error('Unauthenticated', 401);
+        }
+
+        $attendance = AttendanceLog::with('breaks')->find($attendanceId);
+
+        if (!$attendance) {
+            return $this->error('Attendance record not found', 404);
+        }
+
+        // Security check: ensure attendance belongs to current employee unless admin
+        if ($attendance->userid != $user->id && !in_array(optional($user->role)->name, ['Admin', 'Super Admin'])) {
+            return $this->error('Unauthorized access to this attendance record', 403);
+        }
+
+        $tz = $request->header('X-Timezone')
+            ?? $request->input('timezone')
+            ?? $attendance->timezone
+            ?? config('app.timezone', 'Asia/Kolkata');
+
+        $breaks = $attendance->breaks->map(function ($break) use ($tz) {
+            $bMinutes = (int) ($break->duration_minutes ?? 0);
+            $bHours = intdiv($bMinutes, 60);
+            $bMins = $bMinutes % 60;
+
+            if ($bMinutes == 0) {
+                $formattedDuration = $break->end_time ? '0 mins' : 'Ongoing';
+            } elseif ($bHours == 0) {
+                $formattedDuration = "{$bMins} mins";
+            } elseif ($bMins == 0) {
+                $formattedDuration = "{$bHours} hrs";
+            } else {
+                $formattedDuration = "{$bHours} hrs {$bMins} mins";
+            }
+
+            return [
+                'id'                   => $break->id,
+                'attendance_log_id'    => $break->attendance_log_id,
+                'start_time'           => $break->start_time ? Carbon::parse($break->start_time)->setTimezone($tz)->format('Y-m-d H:i:s') : null,
+                'start_time_formatted' => $break->start_time ? Carbon::parse($break->start_time)->setTimezone($tz)->format('h:i A') : null,
+                'end_time'             => $break->end_time ? Carbon::parse($break->end_time)->setTimezone($tz)->format('Y-m-d H:i:s') : null,
+                'end_time_formatted'   => $break->end_time ? Carbon::parse($break->end_time)->setTimezone($tz)->format('h:i A') : null,
+                'duration_minutes'     => $bMinutes,
+                'formatted_duration'   => $formattedDuration,
+                'is_ongoing'           => is_null($break->end_time),
+                'created_at'           => $break->created_at,
+                'updated_at'           => $break->updated_at,
+            ];
+        });
+
+        $totalBreakMinutes = (int) $attendance->breaks()->sum('duration_minutes');
+        $tbHours = intdiv($totalBreakMinutes, 60);
+        $tbMins = $totalBreakMinutes % 60;
+        $totalBreakFormatted = $totalBreakMinutes == 0
+            ? '0 mins'
+            : ($tbHours == 0 ? "{$tbMins} mins" : ($tbMins == 0 ? "{$tbHours} hrs" : "{$tbHours} hrs {$tbMins} mins"));
+
+        return $this->success([
+            'attendance_log_id'     => $attendance->id,
+            'log_date'              => $attendance->log_date,
+            'punch_in'              => $attendance->punch_in ? Carbon::parse($attendance->punch_in)->setTimezone($tz)->format('h:i A') : '--',
+            'punch_out'             => $attendance->punch_out ? Carbon::parse($attendance->punch_out)->setTimezone($tz)->format('h:i A') : '--',
+            'breaks'                => $breaks,
+            'total_breaks_count'    => $breaks->count(),
+            'total_break_minutes'   => $totalBreakMinutes,
+            'total_break_formatted' => $totalBreakFormatted,
+            'excess_break_minutes'  => max(0, $totalBreakMinutes - 60),
+            'has_active_break'      => $breaks->contains('is_ongoing', true),
+        ], 'Attendance breaks retrieved successfully.');
     }
 
 
@@ -824,26 +929,22 @@ class EmployeePortalApiController extends ApiController
         $totalTaken = 0;
         $totalBalance = 0;
 
-        $leaveTypesData = $leaveTypes->map(function ($leaveType) use ($employee, $currentYear, &$totalAllocated, &$totalTaken, &$totalBalance) {
-            $allocation = LeaveAllocation::where('employee_id', $employee->id)
+        $leaveTypesData = $leaveTypes->map(function ($leaveType) use ($employee, &$totalAllocated, &$totalTaken, &$totalBalance) {
+            $allocated = (float) LeaveAllocation::where('employee_id', $employee->id)
                 ->where('leave_type_id', $leaveType->id)
-                ->where('year', $currentYear)
-                ->first();
+                ->sum('allocated_days');
 
             $taken = (float) LeaveRequest::where('employee_id', $employee->id)
                 ->where('leave_type_id', $leaveType->id)
                 ->where('status', 'approved')
-                ->whereYear('start_date', $currentYear)
                 ->sum('duration_days');
 
             $pending = (float) LeaveRequest::where('employee_id', $employee->id)
                 ->where('leave_type_id', $leaveType->id)
                 ->where('status', 'pending')
-                ->whereYear('start_date', $currentYear)
                 ->sum('duration_days');
 
-            $allocated = $allocation ? (float) $allocation->allocated_days : 0;
-            $balance = $allocated - $taken;
+            $balance = max(0, $allocated - $taken);
 
             $totalAllocated += $allocated;
             $totalTaken += $taken;
@@ -1001,138 +1102,119 @@ class EmployeePortalApiController extends ApiController
             return $this->success($leave, 'LOP leave request submitted successfully', 201);
         }
 
-        // Non-LOP category leave balance check
-        $currentYear = date('Y');
-        $allocation = LeaveAllocation::where('employee_id', $employee->id)
+        // Non-LOP category leave balance check - cumulative carry-forward across all years
+        $allocated = (float) LeaveAllocation::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
-            ->where('year', $currentYear)
-            ->first();
-
-        $allocated = $allocation ? (float) $allocation->allocated_days : 0;
+            ->sum('allocated_days');
 
         $leavesTaken = (float) LeaveRequest::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
             ->where('status', 'approved')
-            ->whereYear('start_date', $currentYear)
             ->sum('duration_days');
 
         $remainingBalance = max(0, $allocated - $leavesTaken);
 
-        $probationStart = $employee->probation_start_date ? Carbon::parse($employee->probation_start_date) : null;
-        $probationEnd = $employee->probation_end_date ? Carbon::parse($employee->probation_end_date) : null;
+        $probationStart = $employee->probation_start_date
+            ? Carbon::parse($employee->probation_start_date)->startOfDay()
+            : ($employee->joining_date ? Carbon::parse($employee->joining_date)->startOfDay() : null);
+
+        $probationEnd = $employee->probation_end_date
+            ? Carbon::parse($employee->probation_end_date)->endOfDay()
+            : ($probationStart ? $probationStart->copy()->addMonths(3)->subDay()->endOfDay() : null);
 
         if ($probationStart && $probationEnd) {
-            $leaveStart = Carbon::parse($request->start_date);
-            $probationRestrictionEnd = $probationEnd->copy()->endOfMonth();
+            $leaveStart = Carbon::parse($request->start_date)->startOfDay();
 
-            if ($leaveStart->lte($probationRestrictionEnd)) {
-                $monthsSinceStart = (int) $probationStart->copy()->startOfDay()->diffInMonths($leaveStart->copy()->startOfDay());
-                $probationMaxLeaves = 0;
+            // Check if the leave falls within the 3-month probation period
+            if ($leaveStart->lte($probationEnd) && $leaveStart->gte($probationStart)) {
+                $monthIndex = (int) $probationStart->diffInMonths($leaveStart);
 
-                if ($monthsSinceStart == 0) {
-                    $probationMaxLeaves = 0;
-                } elseif ($monthsSinceStart == 1) {
-                    $probationMaxLeaves = 1;
+                if ($monthIndex === 0) {
+                    // Month 1 of probation: 0 paid leaves allowed. Total will be LOP if leave is taken.
+                    $remainingBalance = 0;
+                } elseif ($monthIndex === 1) {
+                    // Month 2 of probation: 1 leave allowed (deducted from earned balance), rest is LOP
+                    $mStart = $probationStart->copy()->addMonth();
+                    $mEnd = $probationStart->copy()->addMonths(2)->subDay()->endOfDay();
+
+                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->whereIn('status', ['approved', 'pending'])
+                        ->whereDate('start_date', '<=', $mEnd)
+                        ->whereDate('start_date', '>=', $mStart)
+                        ->sum('duration_days');
+
+                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
                 } else {
-                    $probationMaxLeaves = 1.5; // Up to end of probation restriction period
+                    // Month 3 of probation: 1 leave allowed (deducted from earned balance), rest is LOP
+                    $mStart = $probationStart->copy()->addMonths(2);
+                    $mEnd = $probationEnd;
+
+                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->whereIn('status', ['approved', 'pending'])
+                        ->whereDate('start_date', '<=', $mEnd)
+                        ->whereDate('start_date', '>=', $mStart)
+                        ->sum('duration_days');
+
+                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
                 }
-
-                $leavesTakenInRestriction = (float) LeaveRequest::where('employee_id', $employee->id)
-                    ->where('leave_type_id', $request->leave_type_id)
-                    ->whereIn('status', ['approved', 'pending'])
-                    ->whereDate('start_date', '<=', $probationRestrictionEnd)
-                    ->whereDate('start_date', '>=', $probationStart)
-                    ->sum('duration_days');
-
-                $remainingProbationBalance = max(0, $probationMaxLeaves - $leavesTakenInRestriction);
-
-                // Override the bucket balance during probation, because exact joining date
-                // anniversaries (e.g. 15th) happen before the end-of-month cron runs.
-                $remainingBalance = $remainingProbationBalance;
             }
         }
-
-        if ($remainingBalance == 0) {
-            return $this->error("You have 0 days remaining for {$leaveType->name}. Please apply as LOP.", 422);
-        }
-
-        // if ($durationDays > $remainingBalance) {
-        //     $bucketDays = $remainingBalance;
-        //     $lopDays = $durationDays - $remainingBalance;
-
-        //     $bucketLeave = LeaveRequest::create([
-        //         'employee_id' => $employee->id,
-        //         'leave_type_id' => $request->leave_type_id,
-        //         'start_date' => $request->start_date,
-        //         'end_date' => $request->end_date,
-        //         'session1' => $session1,
-        //         'session2' => $session2,
-        //         'duration_days' => $bucketDays,
-        //         'claim_salary' => $request->claim_salary ?? false,
-        //         'document' => $documentPath,
-        //         'reason' => $request->reason,
-        //         'status' => 'pending',
-        //     ]);
-
-        //     $lopLeave = LeaveRequest::create([
-        //         'employee_id' => $employee->id,
-        //         'leave_type_id' => $lopLeaveType->id,
-        //         'start_date' => $request->start_date,
-        //         'end_date' => $request->end_date,
-        //         'session1' => $session1,
-        //         'session2' => $session2,
-        //         'duration_days' => $lopDays,
-        //         'claim_salary' => false,
-        //         'document' => $documentPath,
-        //         'reason' => $request->reason . ' (Auto-split LOP)',
-        //         'status' => 'pending',
-        //     ]);
-
-        //     return $this->success([
-        //         'leave' => $bucketLeave,
-        //         'lop_leave' => $lopLeave,
-        //     ], "Leave request submitted successfully. {$bucketDays} day(s) deducted from {$leaveType->name} and {$lopDays} day(s) created under LOP.", 201);
-        // }
 
         if ($durationDays > $remainingBalance) {
             $split = $this->splitLeaveIntoSlots($start, $end, $session1, $session2, $remainingBalance);
             $bucketDetails = $split['bucket'];
             $lopDetails = $split['lop'];
 
-            $bucketLeave = LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $request->leave_type_id,
-                'start_date' => $bucketDetails['start_date'],
-                'end_date' => $bucketDetails['end_date'],
-                'session1' => $bucketDetails['session1'],
-                'session2' => $bucketDetails['session2'],
-                'duration_days' => $bucketDetails['duration_days'],
-                'claim_salary' => $request->claim_salary ?? false,
-                'document' => $documentPath,
-                'reason' => $request->reason,
-                'status' => 'pending',
-            ]);
+            $bucketLeave = null;
+            if (!empty($bucketDetails) && ($bucketDetails['duration_days'] ?? 0) > 0) {
+                $bucketLeave = LeaveRequest::create([
+                    'employee_id' => $employee->id,
+                    'leave_type_id' => $request->leave_type_id,
+                    'start_date' => $bucketDetails['start_date'],
+                    'end_date' => $bucketDetails['end_date'],
+                    'session1' => $bucketDetails['session1'],
+                    'session2' => $bucketDetails['session2'],
+                    'duration_days' => $bucketDetails['duration_days'],
+                    'claim_salary' => $request->claim_salary ?? false,
+                    'document' => $documentPath,
+                    'reason' => $request->reason,
+                    'status' => 'pending',
+                ]);
+            }
 
-            $lopLeave = LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $lopLeaveType->id,
-                'start_date' => $lopDetails['start_date'],
-                'end_date' => $lopDetails['end_date'],
-                'session1' => $lopDetails['session1'],
-                'session2' => $lopDetails['session2'],
-                'duration_days' => $lopDetails['duration_days'],
-                'claim_salary' => false,
-                'document' => $documentPath,
-                'reason' => $request->reason . ' (Auto-split LOP)',
-                'status' => 'pending',
-            ]);
+            $lopLeave = null;
+            if (!empty($lopDetails) && ($lopDetails['duration_days'] ?? 0) > 0) {
+                $lopLeave = LeaveRequest::create([
+                    'employee_id' => $employee->id,
+                    'leave_type_id' => $lopLeaveType->id,
+                    'start_date' => $lopDetails['start_date'],
+                    'end_date' => $lopDetails['end_date'],
+                    'session1' => $lopDetails['session1'],
+                    'session2' => $lopDetails['session2'],
+                    'duration_days' => $lopDetails['duration_days'],
+                    'claim_salary' => false,
+                    'document' => $documentPath,
+                    'reason' => $request->reason . ($bucketLeave ? ' (Auto-split LOP)' : ' (LOP)'),
+                    'status' => 'pending',
+                ]);
+            }
+
+            if ($bucketLeave && $lopLeave) {
+                $msg = "Leave request submitted successfully. {$bucketDetails['duration_days']} day(s) deducted from {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.";
+            } elseif ($lopLeave) {
+                $msg = "Leave request submitted successfully under LOP ({$lopDetails['duration_days']} day(s)).";
+            } else {
+                $msg = "Leave request submitted successfully.";
+            }
 
             return $this->success(
                 [
-                    'leave' => $bucketLeave,
-                    'lop_leave' => $lopLeave,
+                    'leave' => $bucketLeave ?? $lopLeave,
+                    'lop_leave' => $bucketLeave ? $lopLeave : null,
                 ],
-                "Leave request submitted successfully. {$bucketDetails['duration_days']} day(s) deducted from {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.",
+                $msg,
                 201
             );
         }
@@ -1290,61 +1372,67 @@ class EmployeePortalApiController extends ApiController
             return $this->success($leave, 'LOP leave request updated successfully');
         }
 
-        // Non-LOP category leave balance check
-        $currentYear = date('Y');
-        $allocation = LeaveAllocation::where('employee_id', $employee->id)
+        // Non-LOP category leave balance check - cumulative carry-forward across all years
+        $allocated = (float) LeaveAllocation::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
-            ->where('year', $currentYear)
-            ->first();
-
-        $allocated = $allocation ? (float) $allocation->allocated_days : 0;
+            ->sum('allocated_days');
 
         $leavesTaken = (float) LeaveRequest::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
             ->where('status', 'approved')
             ->where('id', '!=', $leave->id)
-            ->whereYear('start_date', $currentYear)
             ->sum('duration_days');
 
         $remainingBalance = max(0, $allocated - $leavesTaken);
 
-        $probationStart = $employee->probation_start_date ? Carbon::parse($employee->probation_start_date) : null;
-        $probationEnd = $employee->probation_end_date ? Carbon::parse($employee->probation_end_date) : null;
+        $probationStart = $employee->probation_start_date
+            ? Carbon::parse($employee->probation_start_date)->startOfDay()
+            : ($employee->joining_date ? Carbon::parse($employee->joining_date)->startOfDay() : null);
+
+        $probationEnd = $employee->probation_end_date
+            ? Carbon::parse($employee->probation_end_date)->endOfDay()
+            : ($probationStart ? $probationStart->copy()->addMonths(3)->subDay()->endOfDay() : null);
 
         if ($probationStart && $probationEnd) {
-            $leaveStart = Carbon::parse($request->start_date);
-            $probationRestrictionEnd = $probationEnd->copy()->endOfMonth();
+            $leaveStart = Carbon::parse($request->start_date)->startOfDay();
 
-            if ($leaveStart->lte($probationRestrictionEnd)) {
-                $monthsSinceStart = (int) $probationStart->copy()->startOfDay()->diffInMonths($leaveStart->copy()->startOfDay());
-                $probationMaxLeaves = 0;
+            // Check if the leave falls within the 3-month probation period
+            if ($leaveStart->lte($probationEnd) && $leaveStart->gte($probationStart)) {
+                $monthIndex = (int) $probationStart->diffInMonths($leaveStart);
 
-                if ($monthsSinceStart == 0) {
-                    $probationMaxLeaves = 0;
-                } elseif ($monthsSinceStart == 1) {
-                    $probationMaxLeaves = 1;
+                if ($monthIndex === 0) {
+                    // Month 1 of probation: 0 paid leaves allowed. Total will be LOP if leave is taken.
+                    $remainingBalance = 0;
+                } elseif ($monthIndex === 1) {
+                    // Month 2 of probation: 1 leave allowed, rest is LOP
+                    $mStart = $probationStart->copy()->addMonth();
+                    $mEnd = $probationStart->copy()->addMonths(2)->subDay()->endOfDay();
+
+                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->whereIn('status', ['approved', 'pending'])
+                        ->where('id', '!=', $leave->id)
+                        ->whereDate('start_date', '<=', $mEnd)
+                        ->whereDate('start_date', '>=', $mStart)
+                        ->sum('duration_days');
+
+                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
                 } else {
-                    $probationMaxLeaves = 1.5; // Up to end of probation restriction period
+                    // Month 3 of probation: 1 leave allowed (deducted from earned balance), rest is LOP
+                    $mStart = $probationStart->copy()->addMonths(2);
+                    $mEnd = $probationEnd;
+
+                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->whereIn('status', ['approved', 'pending'])
+                        ->where('id', '!=', $leave->id)
+                        ->whereDate('start_date', '<=', $mEnd)
+                        ->whereDate('start_date', '>=', $mStart)
+                        ->sum('duration_days');
+
+                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
                 }
-
-                $leavesTakenInRestriction = (float) LeaveRequest::where('employee_id', $employee->id)
-                    ->where('leave_type_id', $request->leave_type_id)
-                    ->whereIn('status', ['approved', 'pending'])
-                    ->where('id', '!=', $leave->id)
-                    ->whereDate('start_date', '<=', $probationRestrictionEnd)
-                    ->whereDate('start_date', '>=', $probationStart)
-                    ->sum('duration_days');
-
-                $remainingProbationBalance = max(0, $probationMaxLeaves - $leavesTakenInRestriction);
-
-                // Override the bucket balance during probation, because exact joining date
-                // anniversaries (e.g. 15th) happen before the end-of-month cron runs.
-                $remainingBalance = $remainingProbationBalance;
             }
-        }
-
-        if ($remainingBalance <= 0) {
-            return $this->error("You have 0 days remaining for {$leaveType->name}. Please apply as LOP.", 422);
         }
 
         if ($durationDays > $remainingBalance) {
@@ -1352,36 +1440,56 @@ class EmployeePortalApiController extends ApiController
             $bucketDetails = $split['bucket'];
             $lopDetails = $split['lop'];
 
-            $leave->update([
-                'leave_type_id' => $request->leave_type_id,
-                'start_date' => $bucketDetails['start_date'],
-                'end_date' => $bucketDetails['end_date'],
-                'session1' => $bucketDetails['session1'],
-                'session2' => $bucketDetails['session2'],
-                'duration_days' => $bucketDetails['duration_days'],
-                'claim_salary' => $request->claim_salary ?? false,
-                'document' => $documentPath,
-                'reason' => $request->reason,
-            ]);
+            $lopLeave = null;
+            if (!empty($lopDetails) && ($lopDetails['duration_days'] ?? 0) > 0) {
+                $lopLeave = LeaveRequest::create([
+                    'employee_id' => $employee->id,
+                    'leave_type_id' => $lopLeaveType->id,
+                    'start_date' => $lopDetails['start_date'],
+                    'end_date' => $lopDetails['end_date'],
+                    'session1' => $lopDetails['session1'],
+                    'session2' => $lopDetails['session2'],
+                    'duration_days' => $lopDetails['duration_days'],
+                    'claim_salary' => false,
+                    'document' => $documentPath,
+                    'reason' => $request->reason . ' (Auto-split LOP)',
+                    'status' => 'pending',
+                ]);
+            }
 
-            $lopLeave = LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $lopLeaveType->id,
-                'start_date' => $lopDetails['start_date'],
-                'end_date' => $lopDetails['end_date'],
-                'session1' => $lopDetails['session1'],
-                'session2' => $lopDetails['session2'],
-                'duration_days' => $lopDetails['duration_days'],
-                'claim_salary' => false,
-                'document' => $documentPath,
-                'reason' => $request->reason . ' (Auto-split LOP)',
-                'status' => 'pending',
-            ]);
+            if (!empty($bucketDetails) && ($bucketDetails['duration_days'] ?? 0) > 0) {
+                $leave->update([
+                    'leave_type_id' => $request->leave_type_id,
+                    'start_date' => $bucketDetails['start_date'],
+                    'end_date' => $bucketDetails['end_date'],
+                    'session1' => $bucketDetails['session1'],
+                    'session2' => $bucketDetails['session2'],
+                    'duration_days' => $bucketDetails['duration_days'],
+                    'claim_salary' => $request->claim_salary ?? false,
+                    'document' => $documentPath,
+                    'reason' => $request->reason,
+                ]);
 
-            return $this->success([
-                'leave' => $leave,
-                'lop_leave' => $lopLeave,
-            ], "Leave request updated successfully. {$bucketDetails['duration_days']} day(s) allocated to {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.");
+                return $this->success([
+                    'leave' => $leave,
+                    'lop_leave' => $lopLeave,
+                ], "Leave request updated successfully. {$bucketDetails['duration_days']} day(s) allocated to {$leaveType->name} and " . ($lopLeave ? $lopDetails['duration_days'] : 0) . " day(s) created under LOP.");
+            } else {
+                // If 0 paid days allowed, update the existing request itself as LOP
+                $leave->update([
+                    'leave_type_id' => $lopLeaveType->id,
+                    'start_date' => $request->start_date,
+                    'end_date' => $request->end_date,
+                    'session1' => $session1,
+                    'session2' => $session2,
+                    'duration_days' => $durationDays,
+                    'claim_salary' => false,
+                    'document' => $documentPath,
+                    'reason' => $request->reason . ' (LOP)',
+                ]);
+
+                return $this->success($leave, "Leave request updated successfully under LOP ({$durationDays} day(s)).");
+            }
         }
 
         $leave->update([

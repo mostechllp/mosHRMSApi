@@ -26,6 +26,7 @@ class Project extends Model
         'domain_purchased_from',
         'is_email_purchased',
         'status',
+        'budget',
         'special_dates',
         'project_manager_id',
         'team_lead_id',
@@ -35,7 +36,13 @@ class Project extends Model
 
     protected $casts = [
         'special_dates' => 'array',
+        'budget'        => 'decimal:2',
     ];
+
+    public function timeLogs()
+    {
+        return $this->hasMany(ProjectTimeLog::class);
+    }
 
 
     public function emails()

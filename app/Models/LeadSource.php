@@ -19,6 +19,10 @@ class LeadSource extends Model
     public const DEFAULTS = [
         'Website',
         'Referral',
+        'Facebook',
+        'Instagram',
+        'LinkedIn',
+        'WhatsApp',
         'Social Media',
         'Phone',
         'Email',

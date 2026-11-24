@@ -26,6 +26,8 @@ return [
         'https://mos-hrms-git-dev-mostechllps-projects.vercel.app',
         'http://localhost:5173',
         'http://localhost:5174',
+        'https://mos-erp.vercel.app',
+        'https://hrms.mostech.ae'
     ],
 
     'allowed_origins_patterns' => [],

@@ -234,48 +234,11 @@ class LeaveAccrualService
 
         /*
          * Calculate accrual days:
-         * - Month 1 of probation (end of month 1): 1.0 day
-         * - Month 2 of probation (end of month 2): 1.0 day
-         * - Month 3 of probation (end of month 3 / probation end): 2.5 days (total 4.5 for 3 months - 2.0 = 2.5)
-         * - Post-probation: Credit based on days in the month (whether 31, 30, 28, or 29 days)
+         * Flat monthly accrual: 1.5 days per month (or configured accrual_days).
+         * 1.5 * 12 = 18 days per year.
          */
-        $probationStart = !empty($employee->probation_start_date)
-            ? Carbon::parse($employee->probation_start_date)
-            : (!empty($employee->joining_date) ? Carbon::parse($employee->joining_date) : null);
-
-        $probationEnd = !empty($employee->probation_end_date)
-            ? Carbon::parse($employee->probation_end_date)
-            : ($probationStart ? $probationStart->copy()->addMonths(3)->subDay() : null);
-
-        $periodStart = $periodDate->copy()->startOfMonth();
-
         $configuredDays = (float) ($policy->accrual_days > 0 ? $policy->accrual_days : 1.5);
-
-        if ($probationStart && $probationEnd) {
-            $probationStartMonth = $probationStart->copy()->startOfMonth();
-            $probationEndMonth = $probationEnd->copy()->startOfMonth();
-
-            if ($periodStart->gte($probationStartMonth) && $periodStart->lte($probationEndMonth)) {
-                // Total full months in probation
-                $totalProbationMonths = (int) max(1, $probationStartMonth->diffInMonths($probationEndMonth) + 1);
-
-                if ($periodStart->eq($probationEndMonth)) {
-                    // End of probation month: Credit 1.0 for this month PLUS the rest of the probation accrual
-                    // Rest of probation accrual = totalProbationMonths * (configuredDays - 1.0)
-                    $restOfAccrual = $totalProbationMonths * max(0, $configuredDays - 1.0);
-                    $accrualDays = 1.0 + $restOfAccrual;
-                } else {
-                    // Intermediate probation month: Credit 1.0 day at the end of each probation month
-                    $accrualDays = 1.0;
-                }
-            } else {
-                // Post-probation: Credit full accrual days from policy
-                $accrualDays = $configuredDays;
-            }
-        } else {
-            // Post-probation / No probation: Credit full accrual days from policy
-            $accrualDays = $configuredDays;
-        }
+        $accrualDays = $configuredDays;
 
         $accrualDays = min($accrualDays, $remaining);
 
@@ -284,54 +247,24 @@ class LeaveAccrualService
         }
 
         /*
-         * Check probation.
-         *
-         * May 2026 period will correctly be considered
-         * probation if probation starts on 15 May 2026.
+         * Check probation status.
+         * If apply_during_probation is disabled, hold the accrual.
+         * Otherwise, credit directly so the employee earns 1.5 days at month end.
+         * Usage restrictions (Month 1 = 0/LOP, Month 2 = max 1, Month 3 = max 1)
+         * are enforced when leaves are applied.
          */
         $probationStatus = $this->getProbationStatus(
             $employee,
             $periodDate
         );
 
-        if ($probationStatus === 'probation') {
-
-            /*
-             * If leave should not be accrued during probation,
-             * hold it for later release.
-             */
-            if (!$policy->apply_during_probation) {
-
-                return $this->createHeldAccrual(
-                    $employee,
-                    $policy,
-                    $periodDate,
-                    $accrualDays
-                );
-            }
-
-            /*
-             * If admin configured probation action as hold.
-             */
-            if ($policy->probation_action === 'hold') {
-
-                return $this->createHeldAccrual(
-                    $employee,
-                    $policy,
-                    $periodDate,
-                    $accrualDays
-                );
-            }
-
-            /*
-             * If probation_action is:
-             *
-             * accrue
-             * OR
-             * accrue_and_restrict_usage
-             *
-             * then credit the accrual.
-             */
+        if ($probationStatus === 'probation' && !$policy->apply_during_probation) {
+            return $this->createHeldAccrual(
+                $employee,
+                $policy,
+                $periodDate,
+                $accrualDays
+            );
         }
 
         return $this->creditAccrual(
@@ -352,12 +285,7 @@ class LeaveAccrualService
         float $accrualDays
     ): string {
 
-        return DB::transaction(function () use (
-            $employee,
-            $policy,
-            $periodDate,
-            $accrualDays
-        ) {
+        return DB::transaction(function () use ($employee, $policy, $periodDate, $accrualDays) {
 
             $period = $periodDate->format('Y-m');
 
@@ -654,10 +582,7 @@ class LeaveAccrualService
                     continue;
                 }
 
-                DB::transaction(function () use (
-                    $accrual,
-                    $employee
-                ) {
+                DB::transaction(function () use ($accrual, $employee) {
 
                     $allocationYear = Carbon::parse(
                         $accrual->accrual_date

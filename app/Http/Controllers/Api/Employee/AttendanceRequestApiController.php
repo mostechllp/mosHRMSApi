@@ -33,7 +33,7 @@ class AttendanceRequestApiController extends ApiController
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'type' => 'required|string|in:early_check_in,late_check_in,missed_punch_in,missed_punch_out',
+            'type' => 'required|string|in:early_check_in,late_check_in,early_check_out,missed_punch_in,missed_punch_out',
             'request_date' => 'required|date', // Expecting Y-m-d from API
             'request_time' => 'required|date_format:H:i',
             'reason' => 'required|string|max:1000',
@@ -78,10 +78,10 @@ class AttendanceRequestApiController extends ApiController
         }
 
         $request->validate([
-            'type'         => 'sometimes|string|in:early_check_in,late_check_in,missed_punch_in,missed_punch_out',
+            'type' => 'sometimes|string|in:early_check_in,late_check_in,missed_punch_in,missed_punch_out',
             'request_date' => 'sometimes|date',
             'request_time' => 'sometimes|date_format:H:i',
-            'reason'       => 'sometimes|string|max:1000',
+            'reason' => 'sometimes|string|max:1000',
         ]);
 
         $attendanceRequest->update($request->only(['type', 'request_date', 'request_time', 'reason']));

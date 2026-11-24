@@ -34,6 +34,7 @@ use App\Http\Controllers\Api\Admin\UserApiController;
 use App\Http\Controllers\Api\Admin\LeavePolicyController;
 use App\Http\Controllers\Api\Admin\ProjectApiController;
 use App\Http\Controllers\Api\Admin\ProjectAssignmentApiController;
+use App\Http\Controllers\Api\Admin\ProjectCostApiController;
 use App\Http\Controllers\Api\Admin\EmployeeBankDetailApiController;
 use App\Http\Controllers\Api\Admin\EmployeeSalaryComponentApiController;
 use App\Http\Controllers\Api\Admin\EmployeeOnboardingApiController;
@@ -61,6 +62,7 @@ use App\Http\Controllers\Api\Admin\CrmDashboardApiController;
 use App\Http\Controllers\Api\Admin\CrmPermissionSettingsApiController;
 use App\Http\Controllers\Api\Admin\QuotationSettingsApiController;
 use App\Http\Controllers\Api\Admin\MeetingApiController;
+use App\Http\Controllers\Api\CRM\LeadWebhookApiController;
 
 
 
@@ -74,6 +76,9 @@ use App\Http\Controllers\Api\Admin\MeetingApiController;
 // Unified Auth Routes
 Route::group(['prefix' => 'auth'], function () {
     Route::post('login', [LoginController::class, 'login']);
+    Route::post('login/send-otp', [LoginController::class, 'sendLoginOtp']);
+    Route::post('login/verify-otp', [LoginController::class, 'loginWithOtp']);
+    Route::post('login-otp', [LoginController::class, 'loginWithOtp']);
     Route::post('logout', [LoginController::class, 'logout'])->middleware('auth:api');
     Route::get('me', [LoginController::class, 'me'])->middleware('auth:api');
     Route::post('refresh', [LoginController::class, 'refresh']);
@@ -82,6 +87,17 @@ Route::group(['prefix' => 'auth'], function () {
 
     Route::post('forgot-password', [ForgotPasswordApiController::class, 'sendResetCode']);
     Route::post('reset-password', [ForgotPasswordApiController::class, 'resetPassword']);
+});
+
+// CRM Inbound Lead Webhooks & Integrations (Facebook, Instagram, LinkedIn, WhatsApp, Zapier/Make)
+Route::group(['prefix' => 'crm'], function () {
+    // Meta Webhooks (Facebook Lead Ads, Instagram Lead Ads, WhatsApp Cloud API)
+    Route::get('webhooks/meta', [LeadWebhookApiController::class, 'verifyMetaWebhook']);
+    Route::post('webhooks/meta', [LeadWebhookApiController::class, 'handleMetaWebhook']);
+
+    // Universal Secure Lead Webhook / Ingest API (Protected by CRM Secret Key / Token)
+    Route::post('leads/webhook', [LeadWebhookApiController::class, 'ingestLead']);
+    Route::post('leads/ingest', [LeadWebhookApiController::class, 'ingestLead']);
 });
 
 // RBAC Management Routes
@@ -170,6 +186,8 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::post('attendance', [AttendanceApiController::class, 'store'])->middleware('permission:attendance.edit');
     Route::put('attendance/{id}', [AttendanceApiController::class, 'update'])->middleware('permission:attendance.edit');
     Route::delete('attendance/{id}', [AttendanceApiController::class, 'destroy'])->middleware('permission:attendance.delete');
+    Route::get('attendance/{attendanceId}/breaks', [AttendanceApiController::class, 'getBreaksByAttendanceId'])->middleware('permission:attendance.read');
+    Route::get('attendance-breaks/{attendanceId}', [AttendanceApiController::class, 'getBreaksByAttendanceId'])->middleware('permission:attendance.read');
     Route::put('attendance/breaks/{id}', [AttendanceApiController::class, 'updateBreak'])->middleware('permission:attendance.edit');
     Route::delete('attendance/breaks/{id}', [AttendanceApiController::class, 'destroyBreak'])->middleware('permission:attendance.delete');
     Route::get('attendance/breaks/{id}', [AttendanceApiController::class, 'showBreak'])->middleware('permission:attendance.read');
@@ -206,6 +224,19 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     Route::get('project-assignments', [ProjectAssignmentApiController::class, 'index']);
     Route::get('project-assignments/{id}', [ProjectAssignmentApiController::class, 'show']);
     Route::post('employees/projects', [ProjectAssignmentApiController::class, 'assign']);
+
+    // Project Cost & Financial Analysis
+    Route::get('projects/cost/export', [ProjectCostApiController::class, 'export']);
+    Route::get('projects/cost/export/excel', [ProjectCostApiController::class, 'exportExcel']);
+    Route::get('projects/cost/export/pdf', [ProjectCostApiController::class, 'exportPdf']);
+    Route::get('projects/cost', [ProjectCostApiController::class, 'index']);
+    Route::get('projects/cost/{projectId}', [ProjectCostApiController::class, 'show']);
+
+    Route::get('project-cost/export', [ProjectCostApiController::class, 'export']);
+    Route::get('project-cost/export/excel', [ProjectCostApiController::class, 'exportExcel']);
+    Route::get('project-cost/export/pdf', [ProjectCostApiController::class, 'exportPdf']);
+    Route::get('project-cost', [ProjectCostApiController::class, 'index']);
+    Route::get('project-cost/{projectId}', [ProjectCostApiController::class, 'show']);
 
     // Tasks
     Route::get('tasks/employees', [TaskApiController::class, 'listEmployees']);
@@ -752,6 +783,8 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'employee'], function () {
     Route::post('break/start', [EmployeePortalApiController::class, 'startBreak']);
     Route::post('break/end', [EmployeePortalApiController::class, 'endBreak']);
     Route::get('breaks', [EmployeePortalApiController::class, 'getBreaks']);
+    Route::get('attendance/{attendanceId}/breaks', [EmployeePortalApiController::class, 'getAttendanceBreaks']);
+    Route::get('breaks/{attendanceId}', [EmployeePortalApiController::class, 'getAttendanceBreaks']);
 
     // Leaves
     Route::get('leaves', [EmployeePortalApiController::class, 'leaves']);

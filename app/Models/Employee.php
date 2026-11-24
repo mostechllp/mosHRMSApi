@@ -106,6 +106,7 @@ class Employee extends Model
         'highest_education',
         'currency',
         'payment_cycle',
+        'hourly_rate',
         'moh_license_number',
         'reporting_manager_id'
     ];
@@ -114,6 +115,7 @@ class Employee extends Model
         'special_days' => 'array',
         'is_skilled' => 'boolean',
         'additional_documents' => 'array',
+        'hourly_rate' => 'decimal:2',
     ];
 
     public function user()
@@ -208,5 +210,10 @@ class Employee extends Model
         return $this->belongsToMany(Task::class, 'task_employee')
             ->withPivot('status')
             ->withTimestamps();
+    }
+
+    public function projectTimeLogs()
+    {
+        return $this->hasMany(ProjectTimeLog::class);
     }
 }

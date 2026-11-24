@@ -266,11 +266,10 @@ class EmployeePortalApiController extends ApiController
         $totalTaken = 0;
         $totalBalance = 0;
 
-        $leaveTypesData = $leaveTypes->map(function ($leaveType) use ($employee, $currentYear, &$totalAllocated, &$totalTaken, &$totalBalance) {
-            $allocation = \App\Models\LeaveAllocation::where('employee_id', $employee->id)
+        $leaveTypesData = $leaveTypes->map(function ($leaveType) use ($employee, &$totalAllocated, &$totalTaken, &$totalBalance) {
+            $allocated = (float) \App\Models\LeaveAllocation::where('employee_id', $employee->id)
                 ->where('leave_type_id', $leaveType->id)
-                ->where('year', $currentYear)
-                ->first();
+                ->sum('allocated_days');
 
             $taken = (float) LeaveRequest::where('employee_id', $employee->id)
                 ->where('leave_type_id', $leaveType->id)
@@ -282,8 +281,7 @@ class EmployeePortalApiController extends ApiController
                 ->where('status', 'pending')
                 ->sum('duration_days');
 
-            $allocated = $allocation ? (float) $allocation->allocated_days : 0;
-            $balance = $allocated - $taken;
+            $balance = max(0, $allocated - $taken);
 
             $totalAllocated += $allocated;
             $totalTaken += $taken;
@@ -433,24 +431,64 @@ class EmployeePortalApiController extends ApiController
             return $this->success($leave, 'LOP leave request submitted successfully', 201);
         }
 
-        $currentYear = $request->input('year', date('Y'));
-        $allocation = LeaveAllocation::where('employee_id', $employee->id)
+        // Non-LOP category leave balance check - cumulative carry-forward across all years
+        $allocated = (float) LeaveAllocation::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
-            ->where('year', $currentYear)
-            ->first();
-
-        $allocated = $allocation ? (float) $allocation->allocated_days : 0;
+            ->sum('allocated_days');
 
         $leavesTaken = (float) LeaveRequest::where('employee_id', $employee->id)
             ->where('leave_type_id', $request->leave_type_id)
             ->where('status', 'approved')
-            ->whereYear('start_date', $currentYear)
             ->sum('duration_days');
 
         $remainingBalance = max(0, $allocated - $leavesTaken);
 
-        if ($remainingBalance <= 0) {
-            return $this->error("You have 0 days remaining for {$leaveType->name}. Please apply as LOP.", 422);
+        $probationStart = $employee->probation_start_date
+            ? Carbon::parse($employee->probation_start_date)->startOfDay()
+            : ($employee->joining_date ? Carbon::parse($employee->joining_date)->startOfDay() : null);
+
+        $probationEnd = $employee->probation_end_date
+            ? Carbon::parse($employee->probation_end_date)->endOfDay()
+            : ($probationStart ? $probationStart->copy()->addMonths(3)->subDay()->endOfDay() : null);
+
+        if ($probationStart && $probationEnd) {
+            $leaveStart = Carbon::parse($request->start_date)->startOfDay();
+
+            // Check if the leave falls within the 3-month probation period
+            if ($leaveStart->lte($probationEnd) && $leaveStart->gte($probationStart)) {
+                $monthIndex = (int) $probationStart->diffInMonths($leaveStart);
+
+                if ($monthIndex === 0) {
+                    // Month 1 of probation: 0 paid leaves allowed. Total will be LOP if leave is taken.
+                    $remainingBalance = 0;
+                } elseif ($monthIndex === 1) {
+                    // Month 2 of probation: 1 leave allowed, rest is LOP
+                    $mStart = $probationStart->copy()->addMonth();
+                    $mEnd = $probationStart->copy()->addMonths(2)->subDay()->endOfDay();
+
+                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->whereIn('status', ['approved', 'pending'])
+                        ->whereDate('start_date', '<=', $mEnd)
+                        ->whereDate('start_date', '>=', $mStart)
+                        ->sum('duration_days');
+
+                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
+                } else {
+                    // Month 3 of probation: 1 leave allowed (deducted from earned balance), rest is LOP
+                    $mStart = $probationStart->copy()->addMonths(2);
+                    $mEnd = $probationEnd;
+
+                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->whereIn('status', ['approved', 'pending'])
+                        ->whereDate('start_date', '<=', $mEnd)
+                        ->whereDate('start_date', '>=', $mStart)
+                        ->sum('duration_days');
+
+                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
+                }
+            }
         }
 
         if ($durationDays > $remainingBalance) {
@@ -458,38 +496,56 @@ class EmployeePortalApiController extends ApiController
             $bucketDetails = $split['bucket'];
             $lopDetails = $split['lop'];
 
-            $bucketLeave = LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $request->leave_type_id,
-                'start_date' => $bucketDetails['start_date'],
-                'end_date' => $bucketDetails['end_date'],
-                'session1' => $bucketDetails['session1'],
-                'session2' => $bucketDetails['session2'],
-                'duration_days' => $bucketDetails['duration_days'],
-                'claim_salary' => $request->claim_salary ?? false,
-                'document' => $documentPath,
-                'reason' => $request->reason,
-                'status' => 'pending',
-            ]);
+            $bucketLeave = null;
+            if (!empty($bucketDetails) && ($bucketDetails['duration_days'] ?? 0) > 0) {
+                $bucketLeave = LeaveRequest::create([
+                    'employee_id' => $employee->id,
+                    'leave_type_id' => $request->leave_type_id,
+                    'start_date' => $bucketDetails['start_date'],
+                    'end_date' => $bucketDetails['end_date'],
+                    'session1' => $bucketDetails['session1'],
+                    'session2' => $bucketDetails['session2'],
+                    'duration_days' => $bucketDetails['duration_days'],
+                    'claim_salary' => $request->claim_salary ?? false,
+                    'document' => $documentPath,
+                    'reason' => $request->reason,
+                    'status' => 'pending',
+                ]);
+            }
 
-            $lopLeave = LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $lopLeaveType->id,
-                'start_date' => $lopDetails['start_date'],
-                'end_date' => $lopDetails['end_date'],
-                'session1' => $lopDetails['session1'],
-                'session2' => $lopDetails['session2'],
-                'duration_days' => $lopDetails['duration_days'],
-                'claim_salary' => false,
-                'document' => $documentPath,
-                'reason' => $request->reason . ' (Auto-split LOP)',
-                'status' => 'pending',
-            ]);
+            $lopLeave = null;
+            if (!empty($lopDetails) && ($lopDetails['duration_days'] ?? 0) > 0) {
+                $lopLeave = LeaveRequest::create([
+                    'employee_id' => $employee->id,
+                    'leave_type_id' => $lopLeaveType->id,
+                    'start_date' => $lopDetails['start_date'],
+                    'end_date' => $lopDetails['end_date'],
+                    'session1' => $lopDetails['session1'],
+                    'session2' => $lopDetails['session2'],
+                    'duration_days' => $lopDetails['duration_days'],
+                    'claim_salary' => false,
+                    'document' => $documentPath,
+                    'reason' => $request->reason . ($bucketLeave ? ' (Auto-split LOP)' : ' (LOP)'),
+                    'status' => 'pending',
+                ]);
+            }
 
-            return $this->success([
-                'leave' => $bucketLeave,
-                'lop_leave' => $lopLeave,
-            ], "Leave request submitted successfully. {$bucketDetails['duration_days']} day(s) deducted from {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.", 201);
+            if ($bucketLeave && $lopLeave) {
+                $msg = "Leave request submitted successfully. {$bucketDetails['duration_days']} day(s) deducted from {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.";
+            } elseif ($lopLeave) {
+                $msg = "Leave request submitted successfully under LOP ({$lopDetails['duration_days']} day(s)).";
+            } else {
+                $msg = "Leave request submitted successfully.";
+            }
+
+            return $this->success(
+                [
+                    'leave' => $bucketLeave ?? $lopLeave,
+                    'lop_leave' => $bucketLeave ? $lopLeave : null,
+                ],
+                $msg,
+                201
+            );
         }
 
         $leave = LeaveRequest::create([

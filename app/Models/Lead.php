@@ -55,7 +55,12 @@ class Lead extends Model
         static::creating(function ($lead) {
             if (empty($lead->lead_id)) {
                 $nextId = (static::withTrashed()->max('id') ?? 0) + 1;
-                $lead->lead_id = 'LED-' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+                $candidate = 'LED-' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+                while (static::withTrashed()->where('lead_id', $candidate)->exists()) {
+                    $nextId++;
+                    $candidate = 'LED-' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+                }
+                $lead->lead_id = $candidate;
             }
         });
     }

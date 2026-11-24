@@ -45,7 +45,7 @@ class StoreLeadRequest extends FormRequest
             'country'                 => 'nullable|string|max:100',
 
             // Sales Assignment
-            'assigned_salesperson_id' => 'required|exists:employees,id',
+            'assigned_salesperson_id' => 'nullable|exists:employees,id',
             'sales_team'              => 'nullable|string|max:100',
             'expected_value'          => 'nullable|numeric|min:0',
             'expected_closing_date'   => 'nullable|date',

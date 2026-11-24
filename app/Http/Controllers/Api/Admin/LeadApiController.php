@@ -439,7 +439,11 @@ class LeadApiController extends ApiController
         }
 
         if ($request->filled('lead_source')) {
-            $query->where('lead_source', $request->lead_source);
+            if (is_array($request->lead_source)) {
+                $query->whereIn('lead_source', $request->lead_source);
+            } else {
+                $query->where('lead_source', $request->lead_source);
+            }
         }
 
         if ($request->filled('lead_type')) {

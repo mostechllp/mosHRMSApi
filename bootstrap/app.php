@@ -31,13 +31,18 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('hr:check-probation-contract')->weeklyOn(CarbonInterface::MONDAY, '00:05');
         $schedule->command('hr:check-special-days')->weeklyOn(CarbonInterface::MONDAY, '00:05');
         $schedule->command('projects:notify-domain-expiries')->weeklyOn(CarbonInterface::MONDAY, '00:05');
+        // Employee Leave Accrual: End of each month at 23:55
         $schedule->command('leave:accrue')
             ->dailyAt('23:55')
             ->timezone('Asia/Kolkata')
             ->when(function () {
                 return now('Asia/Kolkata')->isLastOfMonth();
             });
-        // $schedule->command('leave:accrue')->everyMinute();
+
+        // Catch-up run on the 1st of every month at 00:05 to ensure any uncredited month is processed
+        $schedule->command('leave:accrue')
+            ->monthlyOn(1, '00:05')
+            ->timezone('Asia/Kolkata');
 
 
         // Auto-generate payroll for all active employees for the previous month
