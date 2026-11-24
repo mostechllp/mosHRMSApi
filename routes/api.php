@@ -771,6 +771,35 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::patch('quotation-settings/taxes/{id}/set-default', [QuotationSettingsApiController::class, 'setDefaultTax'])->middleware('permission:crm.edit');
         Route::delete('quotation-settings/taxes/{id}', [QuotationSettingsApiController::class, 'destroyTax'])->middleware('permission:crm.delete');
     });
+
+    // =========================================================================
+    // ── Accounts Module (Separate Module: Revenue -> Customers) ───────────────
+    // =========================================================================
+    Route::prefix('accounts')->group(function () {
+        // Revenue -> Customers (Primary endpoint requested: /api/admin/accounts/revenue/customers)
+        Route::get('revenue/customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
+        Route::apiResource('revenue/customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+
+        // Sales alias for frontend compatibility (/api/admin/accounts/sales/customers)
+        Route::get('sales/customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
+        Route::apiResource('sales/customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+
+        // Root alias (/api/admin/accounts/customers)
+        Route::get('customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
+        Route::apiResource('customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+    });
+});
+
+// Accounts Module also accessible at /api/accounts/... (direct prefix)
+Route::group(['middleware' => 'auth:api', 'prefix' => 'accounts'], function () {
+    Route::get('revenue/customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
+    Route::apiResource('revenue/customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+
+    Route::get('sales/customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
+    Route::apiResource('sales/customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+
+    Route::get('customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
+    Route::apiResource('customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
 });
 
 
