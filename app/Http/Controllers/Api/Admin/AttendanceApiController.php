@@ -862,10 +862,111 @@ class AttendanceApiController extends ApiController
                 return $this->error('Attendance break record not found', 404);
             }
 
+            // Format start_time and end_time to AM/PM without changing the response structure
+            // $break->start_time = $break->start_time;
+            // $break->end_time = $break->end_time;
+
             return $this->success($break);
         } catch (\Exception $e) {
             Log::error('Attendance Break Fetch Error: ' . $e->getMessage());
             return $this->error('Failed to fetch attendance break: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get all breaks for a specific Attendance Log ID
+     */
+    #[OA\Get(
+        path: '/api/admin/attendance/{attendanceId}/breaks',
+        operationId: 'getBreaksByAttendanceId',
+        summary: 'Get all breaks for a specific attendance log',
+        description: 'Retrieves all break records associated with an attendance log ID along with duration calculations and attendance info.',
+        security: [['bearerAuth' => []]],
+        tags: ['Attendance']
+    )]
+    #[OA\Parameter(name: 'attendanceId', in: 'path', required: true, description: 'Attendance Log ID', schema: new OA\Schema(type: 'integer'))]
+    #[OA\Response(response: 200, description: 'Breaks retrieved successfully')]
+    #[OA\Response(response: 404, description: 'Attendance record not found')]
+    public function getBreaksByAttendanceId(Request $request, $attendanceId): JsonResponse
+    {
+        try {
+            $attendance = AttendanceLog::with(['company', 'user.employee', 'breaks'])->find($attendanceId);
+            if (!$attendance) {
+                return $this->error('Attendance record not found', 404);
+            }
+
+            $tz = $request->input('timezone') ?? $attendance->timezone;
+
+            $breaks = $attendance->breaks->map(function ($break) use ($tz) {
+                $startTimeFormatted = $break->start_time
+                    ? Carbon::parse($break->start_time)->format('h:i A')
+                    : null;
+                $endTimeFormatted = $break->end_time
+                    ? Carbon::parse($break->end_time)->format('h:i A')
+                    : null;
+
+                $bMinutes = (int) ($break->duration_minutes ?? 0);
+                $bHours = intdiv($bMinutes, 60);
+                $bMins = $bMinutes % 60;
+
+                if ($bMinutes == 0) {
+                    $formattedDuration = $break->end_time ? '0 mins' : 'Ongoing';
+                } elseif ($bHours == 0) {
+                    $formattedDuration = "{$bMins} mins";
+                } elseif ($bMins == 0) {
+                    $formattedDuration = "{$bHours} hrs";
+                } else {
+                    $formattedDuration = "{$bHours} hrs {$bMins} mins";
+                }
+
+                return [
+                    'id' => $break->id,
+                    'attendance_log_id' => $break->attendance_log_id,
+                    'start_time' => $break->start_time ? Carbon::parse($break->start_time)->format('Y-m-d H:i:s') : null,
+                    'start_time_formatted' => $startTimeFormatted,
+                    'end_time' => $break->end_time ? Carbon::parse($break->end_time)->format('Y-m-d H:i:s') : null,
+                    'end_time_formatted' => $endTimeFormatted,
+                    'duration_minutes' => $bMinutes,
+                    'formatted_duration' => $formattedDuration,
+                    'is_ongoing' => is_null($break->end_time),
+                    'created_at' => $break->created_at,
+                    'updated_at' => $break->updated_at,
+                ];
+            });
+
+            $totalBreakMinutes = (int) $attendance->breaks()->sum('duration_minutes');
+            $tbHours = intdiv($totalBreakMinutes, 60);
+            $tbMins = $totalBreakMinutes % 60;
+            $totalBreakFormatted = $totalBreakMinutes == 0
+                ? '0 mins'
+                : ($tbHours == 0 ? "{$tbMins} mins" : ($tbMins == 0 ? "{$tbHours} hrs" : "{$tbHours} hrs {$tbMins} mins"));
+
+            $employee = optional($attendance->user)->employee;
+            $employeeName = $employee
+                ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
+                : (optional($attendance->user)->username ?? 'N/A');
+
+            return $this->success([
+                'attendance' => [
+                    'id' => $attendance->id,
+                    'log_date' => $attendance->log_date,
+                    'user_id' => $attendance->userid,
+                    'employee_id' => optional($employee)->employee_id,
+                    'employee_name' => $employeeName,
+                    'attendance_status' => $attendance->attendance_status,
+                    'punch_in' => $attendance->punch_in ? Carbon::parse($attendance->punch_in)->setTimezone($tz)->format('h:i A') : '--',
+                    'punch_out' => $attendance->punch_out ? Carbon::parse($attendance->punch_out)->setTimezone($tz)->format('h:i A') : '--',
+                ],
+                'breaks' => $breaks,
+                'total_breaks_count' => $breaks->count(),
+                'total_break_minutes' => $totalBreakMinutes,
+                'total_break_formatted' => $totalBreakFormatted,
+                'excess_break_minutes' => max(0, $totalBreakMinutes - 60),
+                'has_active_break' => $breaks->contains('is_ongoing', true),
+            ], 'Attendance breaks retrieved successfully.');
+        } catch (\Exception $e) {
+            Log::error('Fetch Attendance Breaks Error: ' . $e->getMessage());
+            return $this->error('Failed to retrieve attendance breaks: ' . $e->getMessage(), 500);
         }
     }
 }

@@ -37,7 +37,7 @@ return new class extends Migration
             $table->text('reason');
             $table->enum('session1', ['morning', 'afternoon'])->nullable();
             $table->enum('session2', ['morning', 'afternoon'])->nullable();
-            $table->integer('duration_days')->nullable();
+            $table->decimal('duration_days', 8, 2)->nullable();
             $table->boolean('claim_salary')->default(false);
             $table->string('document')->nullable();
             $table->enum('status', ['pending', 'approved', 'rejected'])->default('pending');

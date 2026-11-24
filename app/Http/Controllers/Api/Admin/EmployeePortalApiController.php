@@ -9,6 +9,7 @@ use App\Models\WfhRequest;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\Employee;
+use App\Models\Holiday;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -265,11 +266,10 @@ class EmployeePortalApiController extends ApiController
         $totalTaken = 0;
         $totalBalance = 0;
 
-        $leaveTypesData = $leaveTypes->map(function ($leaveType) use ($employee, $currentYear, &$totalAllocated, &$totalTaken, &$totalBalance) {
-            $allocation = \App\Models\LeaveAllocation::where('employee_id', $employee->id)
+        $leaveTypesData = $leaveTypes->map(function ($leaveType) use ($employee, &$totalAllocated, &$totalTaken, &$totalBalance) {
+            $allocated = (float) \App\Models\LeaveAllocation::where('employee_id', $employee->id)
                 ->where('leave_type_id', $leaveType->id)
-                ->where('year', $currentYear)
-                ->first();
+                ->sum('allocated_days');
 
             $taken = (float) LeaveRequest::where('employee_id', $employee->id)
                 ->where('leave_type_id', $leaveType->id)
@@ -281,8 +281,7 @@ class EmployeePortalApiController extends ApiController
                 ->where('status', 'pending')
                 ->sum('duration_days');
 
-            $allocated = $allocation ? (float) $allocation->allocated_days : 0;
-            $balance = $allocated - $taken;
+            $balance = max(0, $allocated - $taken);
 
             $totalAllocated += $allocated;
             $totalTaken += $taken;
@@ -317,8 +316,8 @@ class EmployeePortalApiController extends ApiController
             'reason' => 'required|string|min:10',
             'claim_salary' => 'nullable|boolean',
             'document' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:2048',
-            'session1' => 'nullable|in:morning,afternoon',  // session for start date
-            'session2' => 'nullable|in:morning,afternoon',  // session for end date
+            'session1' => 'nullable|in:morning,afternoon',
+            'session2' => 'nullable|in:morning,afternoon',
             'year' => 'nullable|integer',
         ]);
 
@@ -326,66 +325,85 @@ class EmployeePortalApiController extends ApiController
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
+        // Check if there are overlapping leaves considering session1 and session2
+        $hasOverlap = $this->hasOverlappingLeave(
+            $employee->id,
+            $request->start_date,
+            $request->end_date,
+            $request->input('session1'),
+            $request->input('session2')
+        );
+
+        if ($hasOverlap) {
+            return $this->error('Employee has already applied/taken leave on the selected date(s) and session(s).', 422);
+        }
+
         $leaveType = LeaveType::find($request->leave_type_id);
 
-        // Check for sick leave document
-        if (str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document')) {
+        if ($leaveType && str_contains(strtolower($leaveType->name), 'sick') && !$request->hasFile('document')) {
             return $this->error('Medical certificate is required for sick leave', 422);
         }
 
-        // ── Duration calculation based on session1 / session2 ──────────────────
-        // session1 = session for start_date: 'morning' (from morning = full) | 'afternoon' (from afternoon = half)
-        // session2 = session for end_date:   'morning' (until morning = half) | 'afternoon' (until afternoon = full)
+        $lopLeaveType = LeaveType::where(function ($q) {
+            $q->where('name', 'LIKE', '%LOP%')
+                ->orWhere('name', 'LIKE', '%Loss of Pay%')
+                ->orWhere('name', 'LIKE', '%Unpaid%');
+        })->first();
+
+        if (!$lopLeaveType) {
+            $lopLeaveType = LeaveType::create([
+                'name' => 'LOP',
+                'status' => true,
+            ]);
+        }
+
         $start = Carbon::parse($request->start_date);
         $end = Carbon::parse($request->end_date);
-        $session1 = $request->input('session1', 'morning');   // default: full start day
-        $session2 = $request->input('session2', 'afternoon'); // default: full end day
+        $session1 = $request->input('session1');
+        $session2 = $request->input('session2');
 
         $durationDays = 0.0;
         $currentDate = $start->copy();
 
-        while ($currentDate->lte($end)) {
-            // Exclude Sundays (and holidays if applicable in future)
+        if ($start->isSameDay($end)) {
             if ($currentDate->isSunday()) {
-                $currentDate->addDay();
-                continue;
-            }
-
-            if ($currentDate->isSameDay($start) && $currentDate->isSameDay($end)) {
-                if ($session1 === 'morning' && $session2 === 'afternoon') {
-                    $durationDays += 1.0;
-                } else {
-                    $durationDays += 0.5;
-                }
-            } elseif ($currentDate->isSameDay($start)) {
-                $durationDays += ($session1 === 'morning') ? 1.0 : 0.5;
-            } elseif ($currentDate->isSameDay($end)) {
-                $durationDays += ($session2 === 'afternoon') ? 1.0 : 0.5;
+                $durationDays = 0.0;
+            } elseif (empty($session1) && empty($session2)) {
+                $durationDays = 1.0;
+            } elseif ($session1 === 'morning' && $session2 === 'afternoon') {
+                $durationDays = 1.0;
             } else {
-                $durationDays += 1.0;
+                $durationDays = 0.5;
             }
+        } else {
+            while ($currentDate->lte($end)) {
+                if ($currentDate->isSunday()) {
+                    $currentDate->addDay();
+                    continue;
+                }
 
-            $currentDate->addDay();
+                if ($currentDate->isSameDay($start)) {
+                    if (empty($session1) || $session1 === 'morning') {
+                        $durationDays += 1.0;
+                    } else {
+                        $durationDays += 0.5;
+                    }
+                } elseif ($currentDate->isSameDay($end)) {
+                    if (empty($session2) || $session2 === 'afternoon') {
+                        $durationDays += 1.0;
+                    } else {
+                        $durationDays += 0.5;
+                    }
+                } else {
+                    $durationDays += 1.0;
+                }
+
+                $currentDate->addDay();
+            }
         }
 
-        // Balance check
-        $currentYear = $request->input('year', date('Y'));
-        $allocation = LeaveAllocation::where('employee_id', $employee->id)
-            ->where('leave_type_id', $request->leave_type_id)
-            ->where('year', $currentYear)
-            ->first();
-
-        $allocated = $allocation ? (float) $allocation->allocated_days : 0;
-
-        $leavesTaken = LeaveRequest::where('employee_id', $employee->id)
-            ->where('leave_type_id', $request->leave_type_id)
-            ->where('status', 'approved')
-            ->sum('duration_days');
-
-        $remainingBalance = $allocated - $leavesTaken;
-
-        if ($durationDays > $remainingBalance) {
-            return $this->error("Insufficient leave balance. You have only $remainingBalance days remaining.", 422);
+        if ($durationDays <= 0) {
+            return $this->error('Selected leave duration invalid or falls entirely on non-working days.', 422);
         }
 
         $documentPath = null;
@@ -393,13 +411,150 @@ class EmployeePortalApiController extends ApiController
             $documentPath = $request->file('document')->store('leaves/documents', 'public');
         }
 
+        $isLop = ($leaveType && ($leaveType->id == $lopLeaveType->id || preg_match('/(lop|loss of pay|unpaid)/i', $leaveType->name)));
+
+        if ($isLop) {
+            $leave = LeaveRequest::create([
+                'employee_id' => $employee->id,
+                'leave_type_id' => $leaveType->id,
+                'start_date' => $start,
+                'end_date' => $end,
+                'session1' => $session1,
+                'session2' => $session2,
+                'duration_days' => $durationDays,
+                'claim_salary' => false,
+                'document' => $documentPath,
+                'reason' => $request->reason,
+                'status' => 'pending',
+            ]);
+
+            return $this->success($leave, 'LOP leave request submitted successfully', 201);
+        }
+
+        // Non-LOP category leave balance check - cumulative carry-forward across all years
+        $allocated = (float) LeaveAllocation::where('employee_id', $employee->id)
+            ->where('leave_type_id', $request->leave_type_id)
+            ->sum('allocated_days');
+
+        $leavesTaken = (float) LeaveRequest::where('employee_id', $employee->id)
+            ->where('leave_type_id', $request->leave_type_id)
+            ->where('status', 'approved')
+            ->sum('duration_days');
+
+        $remainingBalance = max(0, $allocated - $leavesTaken);
+
+        $probationStart = $employee->probation_start_date
+            ? Carbon::parse($employee->probation_start_date)->startOfDay()
+            : ($employee->joining_date ? Carbon::parse($employee->joining_date)->startOfDay() : null);
+
+        $probationEnd = $employee->probation_end_date
+            ? Carbon::parse($employee->probation_end_date)->endOfDay()
+            : ($probationStart ? $probationStart->copy()->addMonths(3)->subDay()->endOfDay() : null);
+
+        if ($probationStart && $probationEnd) {
+            $leaveStart = Carbon::parse($request->start_date)->startOfDay();
+
+            // Check if the leave falls within the 3-month probation period
+            if ($leaveStart->lte($probationEnd) && $leaveStart->gte($probationStart)) {
+                $monthIndex = (int) $probationStart->diffInMonths($leaveStart);
+
+                if ($monthIndex === 0) {
+                    // Month 1 of probation: 0 paid leaves allowed. Total will be LOP if leave is taken.
+                    $remainingBalance = 0;
+                } elseif ($monthIndex === 1) {
+                    // Month 2 of probation: 1 leave allowed, rest is LOP
+                    $mStart = $probationStart->copy()->addMonth();
+                    $mEnd = $probationStart->copy()->addMonths(2)->subDay()->endOfDay();
+
+                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->whereIn('status', ['approved', 'pending'])
+                        ->whereDate('start_date', '<=', $mEnd)
+                        ->whereDate('start_date', '>=', $mStart)
+                        ->sum('duration_days');
+
+                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
+                } else {
+                    // Month 3 of probation: 1 leave allowed (deducted from earned balance), rest is LOP
+                    $mStart = $probationStart->copy()->addMonths(2);
+                    $mEnd = $probationEnd;
+
+                    $takenInMonth = (float) LeaveRequest::where('employee_id', $employee->id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->whereIn('status', ['approved', 'pending'])
+                        ->whereDate('start_date', '<=', $mEnd)
+                        ->whereDate('start_date', '>=', $mStart)
+                        ->sum('duration_days');
+
+                    $remainingBalance = min($remainingBalance, max(0, 1.0 - $takenInMonth));
+                }
+            }
+        }
+
+        if ($durationDays > $remainingBalance) {
+            $split = $this->splitLeaveIntoSlots($start, $end, $session1, $session2, $remainingBalance);
+            $bucketDetails = $split['bucket'];
+            $lopDetails = $split['lop'];
+
+            $bucketLeave = null;
+            if (!empty($bucketDetails) && ($bucketDetails['duration_days'] ?? 0) > 0) {
+                $bucketLeave = LeaveRequest::create([
+                    'employee_id' => $employee->id,
+                    'leave_type_id' => $request->leave_type_id,
+                    'start_date' => $bucketDetails['start_date'],
+                    'end_date' => $bucketDetails['end_date'],
+                    'session1' => $bucketDetails['session1'],
+                    'session2' => $bucketDetails['session2'],
+                    'duration_days' => $bucketDetails['duration_days'],
+                    'claim_salary' => $request->claim_salary ?? false,
+                    'document' => $documentPath,
+                    'reason' => $request->reason,
+                    'status' => 'pending',
+                ]);
+            }
+
+            $lopLeave = null;
+            if (!empty($lopDetails) && ($lopDetails['duration_days'] ?? 0) > 0) {
+                $lopLeave = LeaveRequest::create([
+                    'employee_id' => $employee->id,
+                    'leave_type_id' => $lopLeaveType->id,
+                    'start_date' => $lopDetails['start_date'],
+                    'end_date' => $lopDetails['end_date'],
+                    'session1' => $lopDetails['session1'],
+                    'session2' => $lopDetails['session2'],
+                    'duration_days' => $lopDetails['duration_days'],
+                    'claim_salary' => false,
+                    'document' => $documentPath,
+                    'reason' => $request->reason . ($bucketLeave ? ' (Auto-split LOP)' : ' (LOP)'),
+                    'status' => 'pending',
+                ]);
+            }
+
+            if ($bucketLeave && $lopLeave) {
+                $msg = "Leave request submitted successfully. {$bucketDetails['duration_days']} day(s) deducted from {$leaveType->name} and {$lopDetails['duration_days']} day(s) created under LOP.";
+            } elseif ($lopLeave) {
+                $msg = "Leave request submitted successfully under LOP ({$lopDetails['duration_days']} day(s)).";
+            } else {
+                $msg = "Leave request submitted successfully.";
+            }
+
+            return $this->success(
+                [
+                    'leave' => $bucketLeave ?? $lopLeave,
+                    'lop_leave' => $bucketLeave ? $lopLeave : null,
+                ],
+                $msg,
+                201
+            );
+        }
+
         $leave = LeaveRequest::create([
             'employee_id' => $employee->id,
             'leave_type_id' => $request->leave_type_id,
             'start_date' => $start,
             'end_date' => $end,
-            'session1' => $request->input('session1', 'morning'),
-            'session2' => $request->input('session2', 'afternoon'),
+            'session1' => $session1,
+            'session2' => $session2,
             'duration_days' => $durationDays,
             'claim_salary' => $request->claim_salary ?? false,
             'document' => $documentPath,
@@ -420,7 +575,7 @@ class EmployeePortalApiController extends ApiController
         if (!$employee)
             return $this->error('Employee profile not found', 404);
 
-        $reports = TaskReport::where('employee_id', $employee->id)->latest()->get();
+        $reports = TaskReport::where('employee_id', $employee->id)->get()->orderBy('date', 'desc');
         return $this->success($reports);
     }
 
@@ -621,5 +776,172 @@ class EmployeePortalApiController extends ApiController
         $wfh->delete();
 
         return $this->success(null, 'WFH request deleted successfully');
+    }
+
+    private function splitLeaveIntoSlots(Carbon $start, Carbon $end, ?string $session1, ?string $session2, float $remainingBalance): array
+    {
+        $holidays = Holiday::whereBetween('holiday_date', [
+            $start->format('Y-m-d'),
+            $end->format('Y-m-d')
+        ])
+            ->pluck('holiday_date')
+            ->map(fn($date) => Carbon::parse($date)->format('Y-m-d'))
+            ->toArray();
+
+        $isNonWorkingDay = function (Carbon $date) use ($holidays) {
+            return $date->isSunday() || in_array($date->format('Y-m-d'), $holidays);
+        };
+
+        $activeSlots = [];
+        $currentDate = $start->copy();
+
+        while ($currentDate->lte($end)) {
+            if (!$isNonWorkingDay($currentDate)) {
+                $dateStr = $currentDate->format('Y-m-d');
+
+                if ($start->isSameDay($end)) {
+                    if (empty($session1) && empty($session2)) {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } elseif ($session1 === 'morning' && $session2 === 'afternoon') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } elseif ($session1 === 'afternoon' && $session2 === 'afternoon') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } elseif ($session1 === 'morning' && $session2 === 'morning') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                    } else {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    }
+                } elseif ($currentDate->isSameDay($start)) {
+                    if ($session1 === 'afternoon') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    } else {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    }
+                } elseif ($currentDate->isSameDay($end)) {
+                    if ($session2 === 'morning') {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                    } else {
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                        $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                    }
+                } else {
+                    $activeSlots[] = ['date' => $dateStr, 'session' => 'morning'];
+                    $activeSlots[] = ['date' => $dateStr, 'session' => 'afternoon'];
+                }
+            }
+            $currentDate->addDay();
+        }
+
+        $bucketSlotCount = (int) round($remainingBalance * 2);
+        $bucketSlots = array_slice($activeSlots, 0, $bucketSlotCount);
+        $lopSlots = array_slice($activeSlots, $bucketSlotCount);
+
+        $getLeaveDetails = function (array $slots) {
+            if (empty($slots)) {
+                return null;
+            }
+            return [
+                'start_date' => $slots[0]['date'],
+                'end_date' => $slots[count($slots) - 1]['date'],
+                'session1' => $slots[0]['session'],
+                'session2' => $slots[count($slots) - 1]['session'],
+                'duration_days' => count($slots) * 0.5,
+            ];
+        };
+
+        return [
+            'bucket' => $getLeaveDetails($bucketSlots),
+            'lop' => $getLeaveDetails($lopSlots),
+        ];
+    }
+
+    /**
+     * Check if a requested leave session overlaps with existing non-rejected leaves for an employee.
+     */
+    private function hasOverlappingLeave(
+        int $employeeId,
+        string $startDateStr,
+        string $endDateStr,
+        ?string $session1,
+        ?string $session2,
+        ?int $excludeLeaveId = null
+    ): bool {
+        $query = LeaveRequest::where('employee_id', $employeeId)
+            ->where('status', '!=', 'rejected')
+            ->where(function ($q) use ($startDateStr, $endDateStr) {
+                $q->where('start_date', '<=', $endDateStr)
+                    ->where('end_date', '>=', $startDateStr);
+            });
+
+        if ($excludeLeaveId) {
+            $query->where('id', '!=', $excludeLeaveId);
+        }
+
+        $existingLeaves = $query->get();
+
+        if ($existingLeaves->isEmpty()) {
+            return false;
+        }
+
+        $reqStart = Carbon::parse($startDateStr);
+        $reqEnd = Carbon::parse($endDateStr);
+
+        $getOccupiedSessions = function (Carbon $startDate, Carbon $endDate, ?string $s1, ?string $s2, Carbon $targetDate): array {
+            if ($startDate->isSameDay($endDate)) {
+                if (empty($s1) && empty($s2)) {
+                    return ['morning', 'afternoon'];
+                }
+                if ($s1 === 'morning' && $s2 === 'afternoon') {
+                    return ['morning', 'afternoon'];
+                }
+                if ($s1 === 'morning' && ($s2 === 'morning' || empty($s2))) {
+                    return ['morning'];
+                }
+                if (empty($s1) && $s2 === 'morning') {
+                    return ['morning'];
+                }
+                if ($s1 === 'afternoon' && ($s2 === 'afternoon' || empty($s2))) {
+                    return ['afternoon'];
+                }
+                if (empty($s1) && $s2 === 'afternoon') {
+                    return ['afternoon'];
+                }
+                return ['morning', 'afternoon'];
+            } else {
+                if ($targetDate->isSameDay($startDate)) {
+                    return ($s1 === 'afternoon') ? ['afternoon'] : ['morning', 'afternoon'];
+                }
+                if ($targetDate->isSameDay($endDate)) {
+                    return ($s2 === 'morning') ? ['morning'] : ['morning', 'afternoon'];
+                }
+                return ['morning', 'afternoon'];
+            }
+        };
+
+        foreach ($existingLeaves as $existLeave) {
+            $existStart = Carbon::parse($existLeave->start_date);
+            $existEnd = Carbon::parse($existLeave->end_date);
+
+            $overlapStart = $reqStart->gte($existStart) ? $reqStart->copy() : $existStart->copy();
+            $overlapEnd = $reqEnd->lte($existEnd) ? $reqEnd->copy() : $existEnd->copy();
+
+            $curr = $overlapStart->copy();
+            while ($curr->lte($overlapEnd)) {
+                $reqSessions = $getOccupiedSessions($reqStart, $reqEnd, $session1, $session2, $curr);
+                $existSessions = $getOccupiedSessions($existStart, $existEnd, $existLeave->session1, $existLeave->session2, $curr);
+
+                if (!empty(array_intersect($reqSessions, $existSessions))) {
+                    return true;
+                }
+
+                $curr->addDay();
+            }
+        }
+
+        return false;
     }
 }

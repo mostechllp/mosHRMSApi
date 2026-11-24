@@ -11,7 +11,13 @@ class LeaveTypeApiController extends ApiController
 {
     public function index(): JsonResponse
     {
-        $leaveTypes = LeaveType::latest()->get();
+        $leaveTypes = LeaveType::orderBy('id', 'asc')->get();
+        return $this->success($leaveTypes);
+    }
+
+    public function getLeaveTypes(): JsonResponse
+    {
+        $leaveTypes = LeaveType::orderBy('id', 'asc')->where('status', '1')->get();
         return $this->success($leaveTypes);
     }
 
@@ -19,7 +25,7 @@ class LeaveTypeApiController extends ApiController
     {
         $request->validate([
             'name' => 'required|string|max:255|unique:leave_types,name',
-            'status' => 'boolean'
+            'status' => 'boolean',
         ]);
 
         $leaveType = LeaveType::create([
@@ -34,7 +40,7 @@ class LeaveTypeApiController extends ApiController
     {
         $request->validate([
             'name' => 'required|string|max:255|unique:leave_types,name,' . $leaveType->id,
-            'status' => 'boolean'
+            'status' => 'boolean',
         ]);
 
         $leaveType->update([

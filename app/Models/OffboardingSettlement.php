@@ -15,7 +15,15 @@ class OffboardingSettlement extends Model
         'total_deductions',
         'net_payable',
         'status',
-        'remarks'
+        'remarks',
+        'deductions',
+    ];
+
+    protected $casts = [
+        'deductions' => 'array',
+        'total_payable' => 'float',
+        'total_deductions' => 'float',
+        'net_payable' => 'float',
     ];
 
     public function offboarding()
@@ -23,4 +31,3 @@ class OffboardingSettlement extends Model
         return $this->belongsTo(Offboarding::class);
     }
 }
-

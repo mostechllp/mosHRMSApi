@@ -106,6 +106,7 @@ class Employee extends Model
         'highest_education',
         'currency',
         'payment_cycle',
+        'hourly_rate',
         'moh_license_number',
         'reporting_manager_id'
     ];
@@ -114,11 +115,24 @@ class Employee extends Model
         'special_days' => 'array',
         'is_skilled' => 'boolean',
         'additional_documents' => 'array',
+        'hourly_rate' => 'decimal:2',
     ];
 
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function company()
+    {
+        return $this->hasOneThrough(
+            Company::class,
+            User::class,
+            'id',
+            'id',
+            'user_id',
+            'company_id'
+        );
     }
 
     public function getAvatarUrlAttribute()
@@ -143,6 +157,10 @@ class Employee extends Model
     {
         return $this->hasMany(LeaveAllocation::class);
     }
+    public function salaryPackages()
+    {
+        return $this->hasMany(EmployeeSalaryPackage::class);
+    }
 
     public function projects()
     {
@@ -162,6 +180,16 @@ class Employee extends Model
         return $this->hasMany(EmployeeBankDetail::class);
     }
 
+    public function verification()
+    {
+        return $this->hasOne(EmployeeVerification::class);
+    }
+
+    public function preOnboardingChecklist()
+    {
+        return $this->hasOne(EmployeePreOnboardingChecklist::class);
+    }
+
     public function reportingManager()
     {
         return $this->belongsTo(Employee::class, 'reporting_manager_id');
@@ -172,10 +200,20 @@ class Employee extends Model
         return $this->hasMany(Offboarding::class);
     }
 
+    public function warnings()
+    {
+        return $this->hasMany(Warning::class);
+    }
+
     public function tasks()
     {
         return $this->belongsToMany(Task::class, 'task_employee')
             ->withPivot('status')
             ->withTimestamps();
+    }
+
+    public function projectTimeLogs()
+    {
+        return $this->hasMany(ProjectTimeLog::class);
     }
 }

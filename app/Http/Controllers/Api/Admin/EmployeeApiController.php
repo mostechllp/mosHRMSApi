@@ -38,6 +38,21 @@ class EmployeeApiController extends ApiController
         return $this->success($employees);
     }
 
+    public function getActiveEmployees(Request $request): JsonResponse
+    {
+
+        $query = Employee::with(['user.company', 'user.department', 'user.designation', 'salaryComponents', 'bankDetails'])
+            ->whereHas('user', function ($q) {
+                $q->whereNotIn('type', ['admin']);
+            })->whereHas('user', function ($q) {
+                $q->where('status', 'active');
+            });
+
+        $employees = $query->get();
+
+        return $this->success($employees);
+    }
+
     public function store(StoreEmployeeRequest $request): JsonResponse
     {
         $data = $request->validated();

@@ -11,6 +11,7 @@ use App\Models\Party;
 use App\Models\Task;
 use App\Models\Project;
 use App\Models\Folder;
+use App\Models\LeaveRequest;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,7 @@ class DashboardApiController extends ApiController
      */
     public function index(Request $request): JsonResponse
     {
+        // Documents
         $hr = Document::with('folder')
             ->where('type', 'hr')
             ->latest()
@@ -33,7 +35,7 @@ class DashboardApiController extends ApiController
                 $doc->shared_users = User::whereIn('id', $doc->share_with ?? [])->get();
                 return $doc;
             });
-
+    
         $agreements = Document::with('folder')
             ->where('type', 'agreements')
             ->latest()
@@ -44,7 +46,7 @@ class DashboardApiController extends ApiController
                 $doc->shared_users = User::whereIn('id', $doc->share_with ?? [])->get();
                 return $doc;
             });
-
+    
         $others = Document::with('folder')
             ->where('type', 'others')
             ->latest()
@@ -55,7 +57,7 @@ class DashboardApiController extends ApiController
                 $doc->shared_users = User::whereIn('id', $doc->share_with ?? [])->get();
                 return $doc;
             });
-
+    
         $organization_files = Document::with('folder')
             ->where('type', 'organization')
             ->latest()
@@ -66,14 +68,19 @@ class DashboardApiController extends ApiController
                 $doc->shared_users = User::whereIn('id', $doc->share_with ?? [])->get();
                 return $doc;
             });
-
+    
         $tasks = Task::get();
         $projects = Project::get();
-
+    
         $folders = Folder::all();
-
-        $share_with = User::with(['employee', 'company', 'department'])->select('id', 'username')->get();
+    
+        $share_with = User::with(['employee', 'company', 'department'])
+            ->select('id', 'username')
+            ->get();
+    
         $parties = Party::select('id', 'name')->get();
+    
+        // Employees
         $employees = Employee::with([
             'user.department',
             'user.designation',
@@ -84,13 +91,17 @@ class DashboardApiController extends ApiController
                     ->where('status', 'active');
             })
             ->get();
-
+    
+        // Date range: Today to next 6 months
         $today = Carbon::today();
+        $sixMonthsLater = $today->copy()->addMonths(6);
+    
         $yesterday = Carbon::yesterday();
-
+    
+        // Attendance
         $todayStats = $this->getAttendanceStatsByDate($today);
         $yesterdayStats = $this->getAttendanceStatsByDate($yesterday);
-
+    
         $punchChartData = [
             'today' => [
                 'punched_in' => $todayStats['punched_in'],
@@ -101,26 +112,435 @@ class DashboardApiController extends ApiController
                 'punched_out' => $yesterdayStats['punched_out'],
             ]
         ];
-
+    
         $weeklyData = [];
         $weeklyLabels = [];
-
+    
         for ($i = 6; $i >= 0; $i--) {
             $date = Carbon::today()->subDays($i);
-
+    
             $count = AttendanceLog::whereDate('log_date', $date)
                 ->distinct('userid')
                 ->count('userid');
-
+    
             $weeklyData[] = $count;
             $weeklyLabels[] = $date->format('D');
         }
-
+    
+        // Today's approved leaves
+        $todayLeaves = LeaveRequest::with([
+            'employee.user.department',
+            'employee.user.designation',
+            'leaveType'
+        ])
+            ->where('status', 'approved')
+            ->whereDate('start_date', '<=', $today)
+            ->whereDate('end_date', '>=', $today)
+            ->get()
+            ->map(function ($leave) {
+                $employee = $leave->employee;
+                $user = $employee?->user;
+    
+                $employeeName = $employee
+                    ? trim(($employee->first_name ?? '') . ' ' . ($employee->last_name ?? ''))
+                    : null;
+    
+                if (empty($employeeName) && $user) {
+                    $employeeName = $user->username;
+                }
+    
+                return [
+                    'id' => $leave->id,
+                    'employee_id' => $leave->employee_id,
+                    'employee_name' => $employeeName,
+                    'department_name' => $user?->department?->name ?? null,
+                    'designation' => $user?->designation?->name ?? null,
+                    'leave_type' => $leave->leaveType?->name ?? null,
+                    'start_date' => $leave->start_date
+                        ? (is_string($leave->start_date)
+                            ? $leave->start_date
+                            : $leave->start_date->format('Y-m-d'))
+                        : null,
+                    'end_date' => $leave->end_date
+                        ? (is_string($leave->end_date)
+                            ? $leave->end_date
+                            : $leave->end_date->format('Y-m-d'))
+                        : null,
+                    'duration_days' => $leave->duration_days,
+                    'reason' => $leave->reason,
+                    'status' => $leave->status,
+                    'session1' => $leave->session1,
+                    'session2' => $leave->session2,
+                ];
+            });
+    
+        // Birthday and special day lists
+        $todayMonth = $today->month;
+        $todayDay = $today->day;
+    
+        $birthdaysList = [];
+        $specialDaysList = [];
+        $todayBirthdays = [];
+        $todaySpecialDays = [];
+    
+        foreach ($employees as $employee) {
+    
+            $user = $employee->user;
+    
+            $employeeName = trim(
+                ($employee->first_name ?? '') . ' ' . ($employee->last_name ?? '')
+            );
+    
+            if (empty($employeeName) && $user) {
+                $employeeName = $user->username;
+            }
+    
+            $deptName = $user?->department?->name ?? null;
+            $designationName = $user?->designation?->name ?? null;
+    
+            /*
+            |--------------------------------------------------------------------------
+            | 1. Birthdays
+            |--------------------------------------------------------------------------
+            */
+    
+            if (!empty($employee->dob)) {
+                try {
+                    $dob = Carbon::parse($employee->dob);
+    
+                    // Birthday in the current year
+                    $bdayThisYear = Carbon::create(
+                        $today->year,
+                        $dob->month,
+                        $dob->day
+                    )->startOfDay();
+    
+                    // If birthday has passed, calculate next year's birthday
+                    if ($bdayThisYear->lt($today)) {
+                        $bdayThisYear->addYear();
+                    }
+    
+                    // Include only birthdays within the next 6 months
+                    if (
+                        $bdayThisYear->gte($today) &&
+                        $bdayThisYear->lte($sixMonthsLater)
+                    ) {
+                        $isToday = (
+                            $dob->month === $todayMonth &&
+                            $dob->day === $todayDay
+                        );
+    
+                        $daysUntil = (int) $today->diffInDays(
+                            $bdayThisYear,
+                            false
+                        );
+    
+                        $bdayItem = [
+                            'id' => $employee->id,
+                            'employee_id' => $employee->employee_id,
+                            'employee_name' => $employeeName,
+                            'department_name' => $deptName,
+                            'designation' => $designationName,
+                            'dob' => $dob->format('Y-m-d'),
+                            'date' => $bdayThisYear->format('Y-m-d'),
+                            'next_date' => $bdayThisYear->format('Y-m-d'),
+                            'is_today' => $isToday,
+                            'days_until' => $daysUntil,
+                            'type' => 'Birthday',
+                            'event_name' => "{$employeeName}'s Birthday",
+                        ];
+    
+                        $birthdaysList[] = $bdayItem;
+    
+                        if ($isToday) {
+                            $todayBirthdays[] = $bdayItem;
+                        }
+                    }
+    
+                } catch (\Exception $e) {
+                    // Ignore invalid DOB
+                }
+            }
+    
+            /*
+            |--------------------------------------------------------------------------
+            | 2. Work Anniversaries
+            |--------------------------------------------------------------------------
+            */
+    
+            if (!empty($employee->joining_date)) {
+                try {
+                    $joiningDate = Carbon::parse($employee->joining_date);
+    
+                    // Only employees who joined in a previous year
+                    if ($joiningDate->year < $today->year) {
+    
+                        $annivThisYear = Carbon::create(
+                            $today->year,
+                            $joiningDate->month,
+                            $joiningDate->day
+                        )->startOfDay();
+    
+                        // If anniversary has passed, calculate next year's date
+                        if ($annivThisYear->lt($today)) {
+                            $annivThisYear->addYear();
+                        }
+    
+                        // Include only anniversaries within the next 6 months
+                        if (
+                            $annivThisYear->gte($today) &&
+                            $annivThisYear->lte($sixMonthsLater)
+                        ) {
+                            $isToday = (
+                                $joiningDate->month === $todayMonth &&
+                                $joiningDate->day === $todayDay
+                            );
+    
+                            $years = $annivThisYear->year - $joiningDate->year;
+    
+                            $daysUntil = (int) $today->diffInDays(
+                                $annivThisYear,
+                                false
+                            );
+    
+                            $eventName = "{$years} Year Work Anniversary";
+    
+                            $annivItem = [
+                                'id' => $employee->id,
+                                'employee_id' => $employee->employee_id,
+                                'employee_name' => $employeeName,
+                                'department_name' => $deptName,
+                                'designation' => $designationName,
+                                'type' => 'Work Anniversary',
+                                'event_name' => "{$employeeName}'s {$eventName}",
+                                'date' => $annivThisYear->format('Y-m-d'),
+                                'is_today' => $isToday,
+                                'days_until' => $daysUntil,
+                                'years' => $years,
+                            ];
+    
+                            $specialDaysList[] = $annivItem;
+    
+                            if ($isToday) {
+                                $todaySpecialDays[] = $annivItem;
+                            }
+                        }
+                    }
+    
+                } catch (\Exception $e) {
+                    // Ignore invalid joining date
+                }
+            }
+    
+            /*
+            |--------------------------------------------------------------------------
+            | 3. Custom Special Days
+            |--------------------------------------------------------------------------
+            */
+    
+            if (
+                !empty($employee->special_days) &&
+                is_array($employee->special_days)
+            ) {
+    
+                // DOB and joining date for duplicate checking
+                $dobMonthDay = null;
+                $joiningMonthDay = null;
+    
+                try {
+                    if (!empty($employee->dob)) {
+                        $dobMonthDay = Carbon::parse($employee->dob)->format('m-d');
+                    }
+    
+                    if (!empty($employee->joining_date)) {
+                        $joiningMonthDay = Carbon::parse($employee->joining_date)->format('m-d');
+                    }
+    
+                } catch (\Exception $e) {
+                    // Ignore invalid dates
+                }
+    
+                // Avoid duplicate birthday and anniversary entries
+                $skipNameKeywords = [
+                    'birthday',
+                    'birth day',
+                    'bday',
+                    'anniversary',
+                    'work anniversary',
+                    'joining'
+                ];
+    
+                foreach ($employee->special_days as $sDay) {
+    
+                    $sDateStr = is_array($sDay)
+                        ? ($sDay['date'] ?? null)
+                        : null;
+    
+                    $sName = is_array($sDay)
+                        ? ($sDay['name'] ?? 'Special Day')
+                        : 'Special Day';
+    
+                    $sNameLow = strtolower($sName);
+    
+                    // Skip names containing birthday or anniversary keywords
+                    $nameMatches = false;
+    
+                    foreach ($skipNameKeywords as $kw) {
+                        if (str_contains($sNameLow, $kw)) {
+                            $nameMatches = true;
+                            break;
+                        }
+                    }
+    
+                    if ($nameMatches) {
+                        continue;
+                    }
+    
+                    if ($sDateStr) {
+                        try {
+                            $sDate = Carbon::parse($sDateStr);
+    
+                            // Calculate this year's special day
+                            $sThisYear = Carbon::create(
+                                $today->year,
+                                $sDate->month,
+                                $sDate->day
+                            )->startOfDay();
+    
+                            // If it has passed, calculate next year's date
+                            if ($sThisYear->lt($today)) {
+                                $sThisYear->addYear();
+                            }
+    
+                            // Include only special days within the next 6 months
+                            if (
+                                $sThisYear->lt($today) ||
+                                $sThisYear->gt($sixMonthsLater)
+                            ) {
+                                continue;
+                            }
+    
+                            $sMonthDay = $sDate->format('m-d');
+    
+                            // Skip if date matches DOB or joining date
+                            if (
+                                $sMonthDay === $dobMonthDay ||
+                                $sMonthDay === $joiningMonthDay
+                            ) {
+                                continue;
+                            }
+    
+                            $isToday = (
+                                $sThisYear->format('Y-m-d') === $today->format('Y-m-d')
+                            );
+    
+                            $daysUntil = (int) $today->diffInDays(
+                                $sThisYear,
+                                false
+                            );
+    
+                            $customItem = [
+                                'id' => $employee->id,
+                                'employee_id' => $employee->employee_id,
+                                'employee_name' => $employeeName,
+                                'department_name' => $deptName,
+                                'designation' => $designationName,
+                                'type' => 'Custom',
+                                'event_name' => "{$employeeName}'s {$sName}",
+                                'date' => $sThisYear->format('Y-m-d'),
+                                'is_today' => $isToday,
+                                'days_until' => $daysUntil,
+                            ];
+    
+                            $specialDaysList[] = $customItem;
+    
+                            if ($isToday) {
+                                $todaySpecialDays[] = $customItem;
+                            }
+    
+                        } catch (\Exception $e) {
+                            // Ignore invalid special day date
+                        }
+                    }
+                }
+            }
+        }
+    
+        /*
+        |--------------------------------------------------------------------------
+        | Sort Events
+        |--------------------------------------------------------------------------
+        */
+    
+        usort(
+            $birthdaysList,
+            fn($a, $b) => $a['days_until'] <=> $b['days_until']
+        );
+    
+        usort(
+            $specialDaysList,
+            fn($a, $b) => $a['days_until'] <=> $b['days_until']
+        );
+    
+        /*
+        |--------------------------------------------------------------------------
+        | Remove Duplicate Special Days
+        |--------------------------------------------------------------------------
+        */
+    
+        $seen = [];
+    
+        $specialDaysList = array_values(array_filter(
+            $specialDaysList,
+            function ($item) use (&$seen) {
+                $key = ($item['employee_id'] ?? '') . '|' .
+                    ($item['date'] ?? '') . '|' .
+                    ($item['type'] ?? '');
+    
+                if (isset($seen[$key])) {
+                    return false;
+                }
+    
+                $seen[$key] = true;
+                return true;
+            }
+        ));
+    
+        /*
+        |--------------------------------------------------------------------------
+        | Remove Duplicate Birthdays
+        |--------------------------------------------------------------------------
+        */
+    
+        $seenB = [];
+    
+        $birthdaysList = array_values(array_filter(
+            $birthdaysList,
+            function ($item) use (&$seenB) {
+                $key = ($item['employee_id'] ?? '') . '|' .
+                    ($item['date'] ?? '');
+    
+                if (isset($seenB[$key])) {
+                    return false;
+                }
+    
+                $seenB[$key] = true;
+                return true;
+            }
+        ));
+    
+        /*
+        |--------------------------------------------------------------------------
+        | Response
+        |--------------------------------------------------------------------------
+        */
+    
         return $this->success([
             'stats' => [
                 'today' => $todayStats,
                 'yesterday' => $yesterdayStats,
             ],
+    
             'charts' => [
                 'punch_chart' => $punchChartData,
                 'weekly_attendance' => [
@@ -128,6 +548,7 @@ class DashboardApiController extends ApiController
                     'data' => $weeklyData
                 ]
             ],
+    
             'recent_data' => [
                 'organization_files' => $organization_files,
                 'agreements' => $agreements,
@@ -135,13 +556,29 @@ class DashboardApiController extends ApiController
                 'hr' => $hr,
                 'employees' => $employees,
                 'folders' => $folders,
+                'leaves_today' => $todayLeaves,
+                'birthdays' => $birthdaysList,
+                'special_days' => $specialDaysList,
+                'birthdays_today' => $todayBirthdays,
+                'special_days_today' => $todaySpecialDays,
             ],
+    
             'metadata' => [
                 'share_with' => $share_with,
                 'parties' => $parties,
             ],
+    
             'tasks' => $tasks,
-            'projects' => $projects
+            'projects' => $projects,
+    
+            'leaves_today' => $todayLeaves,
+            'employees_leaves_today' => $todayLeaves,
+    
+            'birthdays' => $birthdaysList,
+            'special_days' => $specialDaysList,
+    
+            'birthdays_today' => $todayBirthdays,
+            'special_days_today' => $todaySpecialDays,
         ]);
     }
 
@@ -182,6 +619,11 @@ class DashboardApiController extends ApiController
 
         $absentCount = $activeEmployees - $punchedInCount;
 
+        $onLeaveCount = LeaveRequest::where('status', 'approved')
+            ->whereDate('start_date', '<=', $today)
+            ->whereDate('end_date', '>=', $today)
+            ->count();
+
         return $this->success([
             'employees' => [
                 'total' => $totalEmployees,
@@ -193,6 +635,7 @@ class DashboardApiController extends ApiController
                 'punched_out' => $punchedOutCount,
                 'late' => $lateCount,
                 'absent' => $absentCount > 0 ? $absentCount : 0,
+                'on_leave' => $onLeaveCount,
             ]
         ]);
     }
@@ -245,7 +688,37 @@ class DashboardApiController extends ApiController
     }
 
     /**
-     * Get user notifications.
+     * Whether the current user is an admin (sees all notifications).
+     */
+    private function isAdmin(): bool
+    {
+        $user = auth()->user();
+        return $user && strtolower($user->type ?? '') === 'admin';
+    }
+
+    /**
+     * Apply special_day filter on a notifications query/collection for non-admin users.
+     * Accepts an Eloquent builder or morph-many relationship.
+     */
+    private function applyNotificationFilter($query)
+    {
+        $user = auth()->user();
+        $userType = strtolower($user->type ?? '');
+
+        if ($userType === 'admin') {
+            return $query;
+        }
+
+        if ($userType === 'hr' || $userType === 'admin') {
+            return $query->whereIn('data->type', ['special_day', 'document', 'employee_document', 'domain_expiry', 'project_email_expiry']);
+        }
+
+        return $query->where('data->type', 'special_day');
+    }
+
+    /**
+     * Get unread notifications.
+     * Admins see all; non-admins see only special_day.
      */
     public function getNotifications(): JsonResponse
     {
@@ -254,18 +727,69 @@ class DashboardApiController extends ApiController
             return $this->error('User not found', 401);
         }
 
-        $notifications = $user->unreadNotifications;
+        $notifications = $this->applyNotificationFilter(
+            $user->unreadNotifications()->getQuery()
+        )->latest()->get();
+
         return $this->success($notifications);
+    }
+
+    public function getReadNotifications(): JsonResponse
+    {
+        $user = auth()->user();
+
+        if (!$user) {
+            return $this->error('User not found', 401);
+        }
+
+        $notifications = $this->applyNotificationFilter(
+            $user->readNotifications()
+        )->latest()->get();
+
+        return $this->success($notifications);
+    }
+
+    public function getAllNotifications(): JsonResponse
+    {
+        $user = auth()->user();
+        if (!$user) {
+            return $this->error('User not found', 401);
+        }
+
+        $notifications = $this->applyNotificationFilter(
+            $user->notifications()
+        )->latest()->get();
+
+        return $this->success($notifications);
+    }
+
+    public function showNotification($id): JsonResponse
+    {
+        $user = auth()->user();
+
+        if (!$user) {
+            return $this->error('User not found', 401);
+        }
+
+        $query = $this->applyNotificationFilter($user->notifications());
+        $notification = $query->find($id);
+
+        if (!$notification) {
+            return $this->error('Notification not found', 404);
+        }
+
+        return $this->success($notification);
     }
 
     /**
      * Mark notification as read.
+     * Non-admin users can only mark their own special_day notifications as read.
      */
     public function markAsRead($id): JsonResponse
     {
-        $notification = auth()->user()
-            ->notifications()
-            ->find($id);
+        $user = auth()->user();
+        $query = $this->applyNotificationFilter($user->notifications());
+        $notification = $query->find($id);
 
         if ($notification) {
             $notification->markAsRead();
@@ -273,6 +797,17 @@ class DashboardApiController extends ApiController
         }
 
         return $this->error('Notification not found', 404);
+    }
+
+    public function markAllAsRead(): JsonResponse
+    {
+        $user = auth()->user();
+        $query = $this->applyNotificationFilter($user->notifications())
+            ->whereNull('read_at');
+
+        $query->update(['read_at' => now()]);
+
+        return $this->success(null, 'All notifications marked as read');
     }
 
     /**
@@ -313,12 +848,18 @@ class DashboardApiController extends ApiController
 
         $absentCount = $totalEmployees - $presentCount;
 
+        $onLeaveCount = LeaveRequest::where('status', 'approved')
+            ->whereDate('start_date', '<=', $date)
+            ->whereDate('end_date', '>=', $date)
+            ->count();
+
         return [
             'punched_in' => $punchedIn,
             'punched_out' => $punchedOut,
             'late' => $lateCount,
             'absent' => $absentCount > 0 ? $absentCount : 0,
-            'present' => $presentCount
+            'present' => $presentCount,
+            'on_leave' => $onLeaveCount
         ];
     }
 }

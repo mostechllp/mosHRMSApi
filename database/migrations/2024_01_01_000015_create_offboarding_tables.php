@@ -4,24 +4,42 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration
-{
+return new class extends Migration {
     public function up(): void
     {
         Schema::create('offboardings', function (Blueprint $table) {
+
             $table->id();
-            $table->foreignId('employee_id')->constrained('employees')->cascadeOnDelete();
+
+            $table->foreignId('employee_id')
+                ->constrained('employees')
+                ->cascadeOnDelete();
+
+            $table->foreignId('reporting_manager_id')
+                ->nullable()
+                ->constrained('employees')
+                ->nullOnDelete();
+
             $table->enum('status', [
-                'draft', 'pending_visa', 'pending_checklist', 'pending_assets',
-                'pending_interview', 'pending_settlement', 'pending_letters', 'completed'
+                'draft',
+                'pending_handover',
+                'pending_leave_check',
+                'pending_access',
+                'pending_settlement',
+                'pending_documentation',
+                'completed'
             ])->default('draft');
+
+            $table->date('exit_initiation_date')->nullable();
             $table->date('last_working_day')->nullable();
             $table->string('separation_type')->nullable();
+            $table->date('resignation_date')->nullable();
             $table->integer('notice_period_days')->nullable();
             $table->date('notice_start_date')->nullable();
-            $table->string('visa_sponsorship')->nullable();
-            $table->string('nationality')->nullable();
+            $table->string('acceptance_status')->nullable();
             $table->text('reason_for_leaving')->nullable();
+            $table->text('resignation_reason')->nullable();
+
             $table->timestamps();
         });
 
@@ -69,6 +87,7 @@ return new class extends Migration
             $table->decimal('net_payable', 10, 2)->default(0);
             $table->string('status')->default('pending');
             $table->text('remarks')->nullable();
+            $table->json('deductions')->nullable();
             $table->timestamps();
         });
 

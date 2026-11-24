@@ -35,4 +35,20 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | CRM Lead Ingestion & Social Media Integrations
+    | (Facebook Lead Ads, Instagram Lead Ads, LinkedIn, WhatsApp)
+    |--------------------------------------------------------------------------
+    */
+    'crm_leads' => [
+        'webhook_secret' => env('CRM_LEAD_WEBHOOK_SECRET', 'crm_secret_lead_webhook_key'),
+        'meta' => [
+            'verify_token' => env('META_WEBHOOK_VERIFY_TOKEN', 'crm_leads_mostech_2026'),
+            'page_access_token' => env('META_PAGE_ACCESS_TOKEN'),
+            'graph_version' => env('META_GRAPH_VERSION', 'v19.0'),
+        ],
+        'default_salesperson_id' => env('CRM_DEFAULT_SALESPERSON_ID'),
+    ],
+
 ];

@@ -35,8 +35,8 @@ class CompanyApiController extends ApiController
             'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
             'address' => 'nullable|string',
             'trade_license' => 'nullable|in:freezone,mainland',
-            'trade_license_expiry'=> 'nullable|date',
-            'establishment_card_expiry'=> 'nullable|date'
+            'trade_license_expiry' => 'nullable|date',
+            'establishment_card_expiry' => 'nullable|date'
         ]);
 
         $data = $request->except('logo');
@@ -65,18 +65,31 @@ class CompanyApiController extends ApiController
             'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:255',
             'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'remove_logo' => 'nullable',
             'address' => 'nullable|string',
             'trade_license' => 'nullable|in:freezone,mainland',
-            'trade_license_expiry'=> 'nullable|date',
-            'establishment_card_expiry'=> 'nullable|date'
+            'trade_license_expiry' => 'nullable|date',
+            'establishment_card_expiry' => 'nullable|date',
         ]);
 
-        $data = $request->except('logo');
+        $data = $request->except(['logo', 'remove_logo']);
 
-        if ($request->hasFile('logo')) {
+        // Remove existing logo if requested
+        if ($request->boolean('remove_logo')) {
             if ($company->logo) {
                 Storage::disk('public')->delete($company->logo);
             }
+
+            $data['logo'] = null;
+        }
+
+        // Upload new logo if provided
+        if ($request->hasFile('logo')) {
+            // Delete old logo
+            if ($company->logo) {
+                Storage::disk('public')->delete($company->logo);
+            }
+
             $data['logo'] = $request->file('logo')->store('logos/companies', 'public');
         }
 

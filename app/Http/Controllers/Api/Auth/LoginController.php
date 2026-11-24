@@ -3,7 +3,13 @@
 namespace App\Http\Controllers\Api\Auth;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Mail\LoginOtpMail;
+use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
@@ -86,6 +92,189 @@ class LoginController extends ApiController
         }
 
         return $this->respondWithToken($token, $user);
+    }
+
+    /**
+     * Send One-Time Password (OTP) to user's registered email for passwordless login.
+     * POST /api/auth/login/send-otp
+     */
+    public function sendLoginOtp(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'email'    => 'required_without:username|string',
+            'username' => 'nullable',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation Error', 422, $validator->errors());
+        }
+
+        $identifier = $request->input('email') ?? $request->input('username');
+
+        $user = User::where('email', $identifier)
+            ->orWhere('username', $identifier)
+            ->first();
+
+        if (!$user) {
+            return $this->error('No account found associated with this email or username.', 404);
+        }
+
+        if ($user->status !== 'active') {
+            return $this->error('Account is inactive. Please contact your administrator.', 403);
+        } elseif ($user->status === 'onboarding') {
+            return $this->error('Account is under onboarding and is not yet active.', 403);
+        }
+
+        // Rate-limiting check: prevent requesting new OTP within 60 seconds
+        if (Schema::hasTable('login_otps')) {
+            $recent = DB::table('login_otps')
+                ->where('email', $user->email)
+                ->where('created_at', '>=', now()->subSeconds(60))
+                ->first();
+
+            if ($recent) {
+                return $this->error('An OTP was recently sent. Please wait 60 seconds before requesting a new code.', 429);
+            }
+        }
+
+        // Generate secure 6-digit numeric OTP
+        $otp = (string) random_int(100000, 999999);
+        $expiresAt = now()->addMinutes(10);
+
+        // Store OTP in database or fallback to cache
+        if (Schema::hasTable('login_otps')) {
+            DB::table('login_otps')->updateOrInsert(
+                ['email' => $user->email],
+                [
+                    'otp'        => $otp,
+                    'expires_at' => $expiresAt,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]
+            );
+        } else {
+            cache()->put('login_otp_' . $user->email, [
+                'otp'        => $otp,
+                'expires_at' => $expiresAt->timestamp,
+            ], $expiresAt);
+        }
+
+        // Send OTP via Email
+        try {
+            $displayName = trim(($user->employee?->first_name ?? '') . ' ' . ($user->employee?->last_name ?? '')) ?: $user->username;
+            Mail::to($user->email)->send(new LoginOtpMail($otp, $displayName, 10));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("Failed to send login OTP email to {$user->email}: " . $e->getMessage(), [
+                'exception' => $e
+            ]);
+            return $this->error('Failed to send OTP email: ' . $e->getMessage(), 500);
+        }
+
+        return $this->success([
+            'email'              => $this->maskEmail($user->email),
+            'expires_in_seconds' => 600,
+        ], 'A 6-digit verification code has been sent to your registered email.');
+    }
+
+    /**
+     * Verify OTP and log in the user, returning a JWT access token.
+     * POST /api/auth/login/verify-otp or POST /api/auth/login-otp
+     */
+    public function loginWithOtp(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'email'        => 'required_without:username|string',
+            'username'     => 'required_without:email|string',
+            'otp'          => 'required|string|size:6',
+            'agreeToTerms' => 'nullable|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation Error', 422, $validator->errors());
+        }
+
+        $identifier = $request->input('email') ?? $request->input('username');
+
+        $user = User::where('email', $identifier)
+            ->orWhere('username', $identifier)
+            ->first();
+
+        if (!$user) {
+            return $this->error('Invalid credentials.', 401);
+        }
+
+        if ($user->status !== 'active') {
+            return $this->error('Account is inactive. Please contact your administrator.', 403);
+        } elseif ($user->status === 'onboarding') {
+            return $this->error('Account is under onboarding and is not yet active.', 403);
+        }
+
+        // Verify OTP from database or cache
+        $isValidOtp = false;
+
+        if (Schema::hasTable('login_otps')) {
+            $record = DB::table('login_otps')->where('email', $user->email)->first();
+            if ($record && hash_equals((string) $record->otp, (string) $request->otp)) {
+                if (Carbon::parse($record->expires_at)->isFuture()) {
+                    $isValidOtp = true;
+                }
+            }
+        } else {
+            $cached = cache()->get('login_otp_' . $user->email);
+            if ($cached && hash_equals((string) $cached['otp'], (string) $request->otp) && $cached['expires_at'] > time()) {
+                $isValidOtp = true;
+            }
+        }
+
+        if (!$isValidOtp) {
+            return $this->error('Invalid or expired verification code. Please request a new OTP.', 401);
+        }
+
+        // Handle terms and conditions agreement
+        $agreedNow = $request->boolean('agreeToTerms');
+        if ($agreedNow) {
+            $user->agree_to_terms = true;
+            $user->save();
+        }
+
+        if (!$agreedNow && !$user->agree_to_terms) {
+            return $this->error('You must agree to the terms and conditions to login.', 403);
+        }
+
+        // Invalidate used OTP immediately (one-time use)
+        if (Schema::hasTable('login_otps')) {
+            DB::table('login_otps')->where('email', $user->email)->delete();
+        }
+        cache()->forget('login_otp_' . $user->email);
+
+        // Generate JWT Token
+        if (!$token = auth('api')->login($user)) {
+            return $this->error('Failed to generate authentication token.', 500);
+        }
+
+        return $this->respondWithToken($token, $user);
+    }
+
+    /**
+     * Mask email address for response privacy (e.g., jo***@example.com).
+     */
+    protected function maskEmail(string $email): string
+    {
+        $parts = explode('@', $email);
+        if (count($parts) !== 2) {
+            return $email;
+        }
+
+        $name = $parts[0];
+        $domain = $parts[1];
+
+        if (strlen($name) <= 2) {
+            $maskedName = substr($name, 0, 1) . '*';
+        } else {
+            $maskedName = substr($name, 0, 2) . str_repeat('*', max(2, strlen($name) - 2));
+        }
+
+        return $maskedName . '@' . $domain;
     }
 
     /**
