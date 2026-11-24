@@ -778,6 +778,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
 // Employee Protected Routes (Now also using auth:api)
 Route::group(['middleware' => 'auth:api', 'prefix' => 'employee'], function () {
     Route::get('dashboard', [EmployeePortalApiController::class, 'dashboard']);
+    Route::get('punch-status', [EmployeePortalApiController::class, 'punchStatus']);
     Route::post('punch-in', [EmployeePortalApiController::class, 'punchIn']);
     Route::post('punch-out', [EmployeePortalApiController::class, 'punchOut']);
     Route::post('break/start', [EmployeePortalApiController::class, 'startBreak']);
