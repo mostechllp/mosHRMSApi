@@ -2,11 +2,15 @@
 
 namespace App\Http\Controllers\Api\Admin\Accounts;
 
+use App\Exports\AccountsCustomerExport;
 use App\Http\Controllers\Api\ApiController;
+use App\Imports\AccountsCustomerImport;
 use App\Models\AccountsCustomer;
 use App\Models\AccountsCustomerContactPerson;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Maatwebsite\Excel\Facades\Excel;
 
 class CustomerApiController extends ApiController
 {
@@ -423,5 +427,199 @@ class CustomerApiController extends ApiController
         }
 
         $customer->update(['contact_persons' => $savedPersons]);
+    }
+
+    /**
+     * Unified Export for Accounts Customers (supports format=xlsx, csv, pdf).
+     */
+    public function export(Request $request)
+    {
+        $this->authenticateFromToken($request);
+
+        $format = strtolower($request->input('format', 'xlsx'));
+        if ($format === 'pdf') {
+            return $this->exportPdf($request);
+        }
+
+        return $this->exportExcel($request);
+    }
+
+    /**
+     * Export Accounts Customers to Excel or CSV.
+     */
+    public function exportExcel(Request $request)
+    {
+        $this->authenticateFromToken($request);
+
+        $customers = $this->buildFilteredQuery($request)->get();
+        $rows = $this->prepareExportRows($customers);
+        $filename = 'accounts_customers_' . now()->format('YmdHis');
+
+        $format = strtolower($request->input('format', 'xlsx'));
+        if ($format === 'csv') {
+            return Excel::download(new AccountsCustomerExport($rows), $filename . '.csv', \Maatwebsite\Excel\Excel::CSV);
+        }
+
+        return Excel::download(new AccountsCustomerExport($rows), $filename . '.xlsx', \Maatwebsite\Excel\Excel::XLSX);
+    }
+
+    /**
+     * Export Accounts Customers to PDF.
+     */
+    public function exportPdf(Request $request)
+    {
+        $this->authenticateFromToken($request);
+
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        $customers = $this->buildFilteredQuery($request)->get();
+        $rows = $this->prepareExportRows($customers);
+        $export = new AccountsCustomerExport($rows);
+        $filename = 'accounts_customers_' . now()->format('YmdHis') . '.pdf';
+
+        $pdf = Pdf::loadView('reports.generic_pdf', [
+            'data'     => $export->array(),
+            'headings' => $export->headings(),
+            'title'    => 'Accounts Customers Report',
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Import Accounts Customers from an Excel or CSV file.
+     */
+    public function import(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv,txt',
+        ]);
+
+        $user = auth('api')->user();
+        $companyId = $user?->company_id;
+        $createdBy = $user?->id;
+
+        $importer = new AccountsCustomerImport($companyId, $createdBy);
+
+        try {
+            Excel::import($importer, $request->file('file'));
+
+            return $this->success([
+                'imported_count' => $importer->getImportedCount(),
+                'skipped_count'  => $importer->getSkippedCount(),
+                'errors'         => $importer->getErrors(),
+            ], 'Customers imported successfully.');
+        } catch (\Throwable $e) {
+            return $this->error('Failed to import customers: ' . $e->getMessage(), 422);
+        }
+    }
+
+    /**
+     * Build filtered query for list and exports.
+     */
+    private function buildFilteredQuery(Request $request)
+    {
+        $query = AccountsCustomer::query()->latest();
+
+        try {
+            $query->with('contactPersons');
+        } catch (\Throwable $e) {
+            // fallback
+        }
+
+        $user = auth('api')->user();
+        if ($user && $user->company_id) {
+            $query->where(function ($q) use ($user) {
+                $q->where('company_id', $user->company_id)
+                    ->orWhereNull('company_id');
+            });
+        }
+
+        if ($request->filled('search')) {
+            $search = trim($request->search);
+            $query->where(function ($q) use ($search) {
+                $q->where('display_name', 'like', "%{$search}%")
+                    ->orWhere('company_name', 'like', "%{$search}%")
+                    ->orWhere('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('country', 'like', "%{$search}%")
+                    ->orWhere('mobile', 'like', "%{$search}%")
+                    ->orWhere('work_phone', 'like', "%{$search}%");
+            });
+        }
+
+        if ($request->filled('customer_type')) {
+            $query->where('customer_type', $request->customer_type);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Flatten customers list into export rows.
+     */
+    private function prepareExportRows($customers): array
+    {
+        $rows = [];
+        foreach ($customers as $c) {
+            $rows[] = [
+                $c->customer_type ?? 'Business',
+                $c->display_name ?? '-',
+                $c->salutation ?? '',
+                $c->first_name ?? '',
+                $c->last_name ?? '',
+                $c->company_name ?? '',
+                $c->email ?? '',
+                $c->country ?? 'India',
+                $c->work_phone ?? '',
+                $c->mobile ?? '',
+                $c->gstin_pan ?? '',
+                $c->base_currency ?? 'INR',
+                $c->opening_balance ?? 0,
+                $c->payment_terms ?? 'Due on receipt',
+                $c->billing_attention ?? '',
+                $c->billing_country ?? '',
+                $c->billing_street1 ?? '',
+                $c->billing_street2 ?? '',
+                $c->billing_city ?? '',
+                $c->billing_state ?? '',
+                $c->billing_pin_code ?? '',
+                $c->billing_phone ?? '',
+                $c->shipping_attention ?? '',
+                $c->shipping_country ?? '',
+                $c->shipping_street1 ?? '',
+                $c->shipping_street2 ?? '',
+                $c->shipping_city ?? '',
+                $c->shipping_state ?? '',
+                $c->shipping_pin_code ?? '',
+                $c->shipping_phone ?? '',
+                $c->remarks ?? '',
+            ];
+        }
+        return $rows;
+    }
+
+    /**
+     * Authenticate via bearer token or URL query token for exports.
+     */
+    private function authenticateFromToken(Request $request): void
+    {
+        if (!$request->bearerToken() && $request->has('token')) {
+            try {
+                $user = auth('api')->setToken($request->token)->user();
+                if ($user) {
+                    auth('api')->setUser($user);
+                }
+            } catch (\Throwable $e) {
+                // Ignore
+            }
+        }
+
+        if (!auth('api')->check()) {
+            abort(403, 'Forbidden - Access denied. Please provide a valid token.');
+        }
     }
 }
