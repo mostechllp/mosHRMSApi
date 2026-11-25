@@ -31,6 +31,22 @@ class AttendanceRequestApiController extends ApiController
             'status' => $request->status,
         ]);
 
+        // If a late check-in request is rejected by HR, void/cancel that day's attendance log
+        if ($attendanceRequest->type === 'late_check_in' && $request->status === 'rejected') {
+            $employee = $attendanceRequest->employee;
+            if ($employee && $employee->user_id) {
+                $log = \App\Models\AttendanceLog::where('userid', $employee->user_id)
+                    ->whereDate('log_date', $attendanceRequest->request_date)
+                    ->first();
+                if ($log) {
+                    $log->update([
+                        'attendance_status' => 'absent',
+                        'status'            => 0,
+                    ]);
+                }
+            }
+        }
+
         return $this->success($attendanceRequest, 'Request status updated successfully.');
     }
 

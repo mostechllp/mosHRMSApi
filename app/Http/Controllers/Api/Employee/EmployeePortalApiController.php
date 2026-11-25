@@ -51,6 +51,35 @@ class EmployeePortalApiController extends ApiController
         // Store raw punch_out status BEFORE formatting
         $isPunchedOut = $attendance && !is_null($attendance->punch_out);
 
+        $lateRequest = null;
+        $showTimer = (bool) $attendance;
+        $approvalStatus = $attendance ? 'approved' : null;
+
+        if ($user->employee) {
+            $hasLeaveToday = LeaveRequest::where('employee_id', $user->employee->id)
+                ->whereDate('start_date', '<=', $today)
+                ->whereDate('end_date', '>=', $today)
+                ->whereIn('status', ['approved', 'pending'])
+                ->exists();
+
+            if ($hasLeaveToday) {
+                // If leave applied for today, any punch-in is approved and timer runs immediately
+                $showTimer = (bool) $attendance;
+                $approvalStatus = $attendance ? 'approved' : null;
+            } else {
+                $lateRequest = AttendanceRequest::where('employee_id', $user->employee->id)
+                    ->where('request_date', $today)
+                    ->where('type', 'late_check_in')
+                    ->latest()
+                    ->first();
+
+                if ($lateRequest) {
+                    $approvalStatus = $lateRequest->status;
+                    $showTimer = ($lateRequest->status === 'approved');
+                }
+            }
+        }
+
         if ($attendance) {
             $tz = config('app.timezone', 'Asia/Dubai');
 
@@ -446,6 +475,13 @@ class EmployeePortalApiController extends ApiController
                 'punched_out' => $isPunchedOut,
                 'punch_in_time' => $attendance ? $attendance->punch_in : null,
                 'punch_out_time' => $attendance ? $attendance->punch_out : null,
+                'show_timer' => $showTimer,
+                'approval_status' => $approvalStatus,
+                'late_request' => $lateRequest ? [
+                    'id' => $lateRequest->id,
+                    'status' => $lateRequest->status,
+                    'reason' => $lateRequest->reason,
+                ] : null,
                 'punch_in_location' => [
                     'latitude' => $attendance ? $attendance->punch_in_latitude : null,
                     'longitude' => $attendance ? $attendance->punch_in_longitude : null,
@@ -550,6 +586,17 @@ class EmployeePortalApiController extends ApiController
         $cutoffDateTime = Carbon::createFromFormat('Y-m-d H:i:s', "{$today} {$lateCutoffTime}", $tz);
         $isPastCutoff = $now->greaterThan($cutoffDateTime);
 
+        // Check if employee applied for leave today (pending or approved)
+        $hasLeaveToday = LeaveRequest::where('employee_id', $employee->id)
+            ->whereDate('start_date', '<=', $today)
+            ->whereDate('end_date', '>=', $today)
+            ->whereIn('status', ['approved', 'pending'])
+            ->exists();
+
+        if ($hasLeaveToday) {
+            $isPastCutoff = false;
+        }
+
         $attendance = AttendanceLog::where('userid', $user->id)
             ->whereDate('log_date', $today)
             ->first();
@@ -560,23 +607,43 @@ class EmployeePortalApiController extends ApiController
             ->latest()
             ->first();
 
+        $approvalStatus = 'approved';
+        $showTimer = false;
         $canPunchIn = false;
-        if (!$attendance) {
-            if (!$isPastCutoff) {
-                $canPunchIn = true;
-            } elseif ($lateRequest && $lateRequest->status === 'approved') {
-                $canPunchIn = true;
+
+        if ($attendance) {
+            $canPunchIn = false;
+            if ($hasLeaveToday) {
+                $approvalStatus = 'approved';
+                $showTimer = true;
+            } elseif ($lateRequest) {
+                $approvalStatus = $lateRequest->status; // 'pending', 'approved', 'rejected'
+                $showTimer = ($lateRequest->status === 'approved');
+            } else {
+                // Punched in on time (no late approval needed)
+                $approvalStatus = 'approved';
+                $showTimer = true;
             }
+        } else {
+            // Not yet punched in
+            $canPunchIn = true;
+            $showTimer = false;
+            $approvalStatus = null;
         }
 
         return $this->success([
-            'is_punched_in'  => (bool)$attendance,
-            'is_punched_out' => $attendance && !is_null($attendance->punch_out),
-            'current_time'   => $now->format('h:i A'),
-            'cutoff_time'    => Carbon::parse($lateCutoffTime)->format('h:i A'),
-            'is_late'        => $isPastCutoff,
-            'can_punch_in'   => $canPunchIn,
-            'late_request'   => $lateRequest ? [
+            'is_punched_in'    => (bool)$attendance,
+            'is_punched_out'   => $attendance && !is_null($attendance->punch_out),
+            'punch_in_time'    => $attendance && $attendance->punch_in ? Carbon::parse($attendance->punch_in)->setTimezone($tz)->format('h:i A') : null,
+            'raw_punch_in'     => $attendance ? $attendance->punch_in : null,
+            'current_time'     => $now->format('h:i A'),
+            'cutoff_time'      => Carbon::parse($lateCutoffTime)->format('h:i A'),
+            'is_late'          => $isPastCutoff,
+            'has_leave_today'  => $hasLeaveToday,
+            'can_punch_in'     => $canPunchIn,
+            'show_timer'       => $showTimer,
+            'approval_status'  => $approvalStatus,
+            'late_request'     => (!$hasLeaveToday && $lateRequest) ? [
                 'id'           => $lateRequest->id,
                 'status'       => $lateRequest->status,
                 'reason'       => $lateRequest->reason,
@@ -591,17 +658,18 @@ class EmployeePortalApiController extends ApiController
     public function punchIn(Request $request): JsonResponse
     {
         $request->validate([
-            'punch_in_latitude' => 'nullable|numeric',
+            'punch_in_latitude'  => 'nullable|numeric',
             'punch_in_longitude' => 'nullable|numeric',
-            'punch_in_address' => 'nullable|string',
-            'timezone' => 'nullable|string',
-            'reason' => 'nullable|string|max:1000',
-            'late_reason' => 'nullable|string|max:1000',
+            'punch_in_address'   => 'nullable|string',
+            'timezone'           => 'nullable|string',
+            'reason'             => 'nullable|string|max:1000',
+            'late_reason'        => 'nullable|string|max:1000',
         ]);
         $user = auth('api')->user();
         $employee = $user ? $user->employee : null;
-        if (!$employee)
+        if (!$employee) {
             return $this->error('Employee profile not found', 404);
+        }
 
         // Check for missing punch out on previous records
         $missingPunchOut = AttendanceLog::where('userid', $user->id)
@@ -642,83 +710,22 @@ class EmployeePortalApiController extends ApiController
         $cutoffDateTime = Carbon::createFromFormat('Y-m-d H:i:s', "{$today} {$lateCutoffTime}", $tz);
         $isLate = $now->greaterThan($cutoffDateTime);
 
+        // Check if employee applied for leave today (pending or approved)
+        $hasLeaveToday = LeaveRequest::where('employee_id', $employee->id)
+            ->whereDate('start_date', '<=', $today)
+            ->whereDate('end_date', '>=', $today)
+            ->whereIn('status', ['approved', 'pending'])
+            ->exists();
+
+        // If employee applied for leave today, late check is completely bypassed!
+        if ($hasLeaveToday) {
+            $isLate = false;
+        }
+
         if ($isLate) {
-            $lateRequest = AttendanceRequest::where('employee_id', $employee->id)
-                ->where('request_date', $today)
-                ->where('type', 'late_check_in')
-                ->latest()
-                ->first();
+            $reason = $request->input('reason') ?? $request->input('late_reason');
 
-            if ($lateRequest && $lateRequest->status === 'approved') {
-                // Approved by HR: allow punch in to proceed
-            } elseif ($lateRequest && $lateRequest->status === 'pending') {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Late Punch-in: Your late check-in request for today (' . Carbon::parse($lateCutoffTime)->format('h:i A') . ' cutoff) is currently pending HR approval. You cannot punch in until HR approves your request.',
-                    'data' => [
-                        'is_late' => true,
-                        'cutoff_time' => $lateCutoffTime,
-                        'request_status' => 'pending',
-                        'request_id' => $lateRequest->id,
-                        'can_punch_in' => false,
-                    ]
-                ], 403);
-            } elseif ($lateRequest && $lateRequest->status === 'rejected') {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Late Punch-in: Your late check-in request for today was rejected by HR. Please contact HR.',
-                    'data' => [
-                        'is_late' => true,
-                        'cutoff_time' => $lateCutoffTime,
-                        'request_status' => 'rejected',
-                        'request_id' => $lateRequest->id,
-                        'can_punch_in' => false,
-                    ]
-                ], 403);
-            } else {
-                // No request exists yet for today. Check if a reason was submitted in this request.
-                $reason = $request->input('reason') ?? $request->input('late_reason');
-
-                if (!empty($reason)) {
-                    $newRequest = AttendanceRequest::create([
-                        'employee_id' => $employee->id,
-                        'type' => 'late_check_in',
-                        'request_date' => $today,
-                        'request_time' => $now->format('H:i:s'),
-                        'reason' => trim($reason),
-                        'status' => 'pending',
-                    ]);
-
-                    // Notify HR / Admins
-                    try {
-                        $hrUsers = User::where(function ($q) {
-                            $q->whereIn('type', ['admin', 'hr'])
-                              ->orWhereHas('role', function ($rq) {
-                                  $rq->whereIn('name', ['Super Admin', 'Sub Admin', 'HR Manager', 'Admin']);
-                              });
-                        })->where('status', 'active')->get();
-
-                        if ($hrUsers->isNotEmpty()) {
-                            Notification::send($hrUsers, new LatePunchInRequestedNotification($newRequest));
-                        }
-                    } catch (\Throwable $e) {
-                        Log::error('Failed to notify HR of late punch-in request: ' . $e->getMessage());
-                    }
-
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Late Punch-in: You are punching in after ' . Carbon::parse($lateCutoffTime)->format('h:i A') . '. A late punch-in request has been submitted to HR. Please wait for HR approval.',
-                        'data' => [
-                            'is_late' => true,
-                            'cutoff_time' => $lateCutoffTime,
-                            'request_status' => 'pending',
-                            'request_id' => $newRequest->id,
-                            'can_punch_in' => false,
-                        ]
-                    ], 403);
-                }
-
-                // If no reason provided, inform the frontend/employee that a reason is required
+            if (empty(trim((string)$reason))) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Late Punch-in: You are attempting to punch in after ' . Carbon::parse($lateCutoffTime)->format('h:i A') . '. HR approval is required. Please provide your reason to request HR approval.',
@@ -730,25 +737,93 @@ class EmployeePortalApiController extends ApiController
                     ]
                 ], 403);
             }
+
+            // 1. Create the late request for HR
+            $newRequest = AttendanceRequest::create([
+                'employee_id'  => $employee->id,
+                'type'         => 'late_check_in',
+                'request_date' => $today,
+                'request_time' => $now->format('H:i:s'),
+                'reason'       => trim($reason),
+                'status'       => 'pending',
+            ]);
+
+            // 2. IMMEDIATELY create the AttendanceLog with the exact current punch-in time!
+            $log = AttendanceLog::create([
+                'userid'              => $user->id,
+                'log_date'            => $now->toDateString(),
+                'punch_in'            => $now,
+                'status'              => 1,
+                'log_status'          => 'IN',
+                'attendance_status'   => 'late',
+                'punch_in_latitude'   => $request->punch_in_latitude,
+                'punch_in_longitude'  => $request->punch_in_longitude,
+                'punch_in_address'    => $request->punch_in_address,
+                'timezone'            => $tz
+            ]);
+
+            // 3. Notify HR / Admins
+            try {
+                $hrUsers = User::where(function ($q) {
+                    $q->whereIn('type', ['admin', 'hr'])
+                      ->orWhereHas('role', function ($rq) {
+                          $rq->whereIn('name', ['Super Admin', 'Sub Admin', 'HR Manager', 'Admin']);
+                      });
+                })->where('status', 'active')->get();
+
+                if ($hrUsers->isNotEmpty()) {
+                    Notification::send($hrUsers, new LatePunchInRequestedNotification($newRequest));
+                }
+            } catch (\Throwable $e) {
+                Log::error('Failed to notify HR of late punch-in request: ' . $e->getMessage());
+            }
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Punch-in recorded at ' . $now->format('h:i A') . '. Late approval request has been sent to HR. Waiting for HR approval.',
+                'data'    => [
+                    'attendance'      => $log,
+                    'is_late'         => true,
+                    'cutoff_time'     => $lateCutoffTime,
+                    'punch_in_time'   => $now->format('h:i A'),
+                    'raw_punch_in'    => $now->toDateTimeString(),
+                    'approval_status' => 'pending',
+                    'show_timer'      => false,
+                    'request_id'      => $newRequest->id,
+                ]
+            ], 201);
         }
 
+        // On-time punch in (<= 10:00 AM) or Leave-exempt punch in
         $timezone = $request->timezone;
 
         $log = AttendanceLog::create([
-            // 'company_id' => $user->company_id ?? 1,
-            'userid' => $user->id,
-            'log_date' => Carbon::now($timezone)->toDateString(),
-            'punch_in' => Carbon::now($timezone),
-            'status' => 1,
-            'log_status' => 'IN',
-            'attendance_status' => $isLate ? 'late' : 'present',
-            'punch_in_latitude' => $request->punch_in_latitude,
-            'punch_in_longitude' => $request->punch_in_longitude,
-            'punch_in_address' => $request->punch_in_address,
-            'timezone' => $request->timezone
+            'userid'              => $user->id,
+            'log_date'            => Carbon::now($timezone)->toDateString(),
+            'punch_in'            => Carbon::now($timezone),
+            'status'              => 1,
+            'log_status'          => 'IN',
+            'attendance_status'   => $hasLeaveToday ? 'half_day' : 'present',
+            'punch_in_latitude'   => $request->punch_in_latitude,
+            'punch_in_longitude'  => $request->punch_in_longitude,
+            'punch_in_address'    => $request->punch_in_address,
+            'timezone'            => $request->timezone
         ]);
 
-        return $this->success($log, 'Punched in successfully.', 201);
+        return response()->json([
+            'status'  => 'success',
+            'message' => $hasLeaveToday ? 'Punched in successfully (Leave session).' : 'Punched in successfully.',
+            'data'    => [
+                'attendance'      => $log,
+                'is_late'         => false,
+                'has_leave_today' => $hasLeaveToday,
+                'cutoff_time'     => $lateCutoffTime,
+                'punch_in_time'   => Carbon::now($timezone)->format('h:i A'),
+                'raw_punch_in'    => Carbon::now($timezone)->toDateTimeString(),
+                'approval_status' => 'approved',
+                'show_timer'      => true,
+            ]
+        ], 201);
     }
 
     /**
