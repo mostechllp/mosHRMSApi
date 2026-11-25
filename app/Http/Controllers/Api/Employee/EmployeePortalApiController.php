@@ -56,15 +56,27 @@ class EmployeePortalApiController extends ApiController
         $approvalStatus = $attendance ? 'approved' : null;
 
         if ($user->employee) {
-            $lateRequest = AttendanceRequest::where('employee_id', $user->employee->id)
-                ->where('request_date', $today)
-                ->where('type', 'late_check_in')
-                ->latest()
-                ->first();
+            $hasLeaveToday = LeaveRequest::where('employee_id', $user->employee->id)
+                ->whereDate('start_date', '<=', $today)
+                ->whereDate('end_date', '>=', $today)
+                ->whereIn('status', ['approved', 'pending'])
+                ->exists();
 
-            if ($lateRequest) {
-                $approvalStatus = $lateRequest->status;
-                $showTimer = ($lateRequest->status === 'approved');
+            if ($hasLeaveToday) {
+                // If leave applied for today, any punch-in is approved and timer runs immediately
+                $showTimer = (bool) $attendance;
+                $approvalStatus = $attendance ? 'approved' : null;
+            } else {
+                $lateRequest = AttendanceRequest::where('employee_id', $user->employee->id)
+                    ->where('request_date', $today)
+                    ->where('type', 'late_check_in')
+                    ->latest()
+                    ->first();
+
+                if ($lateRequest) {
+                    $approvalStatus = $lateRequest->status;
+                    $showTimer = ($lateRequest->status === 'approved');
+                }
             }
         }
 
@@ -574,6 +586,17 @@ class EmployeePortalApiController extends ApiController
         $cutoffDateTime = Carbon::createFromFormat('Y-m-d H:i:s', "{$today} {$lateCutoffTime}", $tz);
         $isPastCutoff = $now->greaterThan($cutoffDateTime);
 
+        // Check if employee applied for leave today (pending or approved)
+        $hasLeaveToday = LeaveRequest::where('employee_id', $employee->id)
+            ->whereDate('start_date', '<=', $today)
+            ->whereDate('end_date', '>=', $today)
+            ->whereIn('status', ['approved', 'pending'])
+            ->exists();
+
+        if ($hasLeaveToday) {
+            $isPastCutoff = false;
+        }
+
         $attendance = AttendanceLog::where('userid', $user->id)
             ->whereDate('log_date', $today)
             ->first();
@@ -590,7 +613,10 @@ class EmployeePortalApiController extends ApiController
 
         if ($attendance) {
             $canPunchIn = false;
-            if ($lateRequest) {
+            if ($hasLeaveToday) {
+                $approvalStatus = 'approved';
+                $showTimer = true;
+            } elseif ($lateRequest) {
                 $approvalStatus = $lateRequest->status; // 'pending', 'approved', 'rejected'
                 $showTimer = ($lateRequest->status === 'approved');
             } else {
@@ -613,10 +639,11 @@ class EmployeePortalApiController extends ApiController
             'current_time'     => $now->format('h:i A'),
             'cutoff_time'      => Carbon::parse($lateCutoffTime)->format('h:i A'),
             'is_late'          => $isPastCutoff,
+            'has_leave_today'  => $hasLeaveToday,
             'can_punch_in'     => $canPunchIn,
             'show_timer'       => $showTimer,
             'approval_status'  => $approvalStatus,
-            'late_request'     => $lateRequest ? [
+            'late_request'     => (!$hasLeaveToday && $lateRequest) ? [
                 'id'           => $lateRequest->id,
                 'status'       => $lateRequest->status,
                 'reason'       => $lateRequest->reason,
@@ -682,6 +709,18 @@ class EmployeePortalApiController extends ApiController
 
         $cutoffDateTime = Carbon::createFromFormat('Y-m-d H:i:s', "{$today} {$lateCutoffTime}", $tz);
         $isLate = $now->greaterThan($cutoffDateTime);
+
+        // Check if employee applied for leave today (pending or approved)
+        $hasLeaveToday = LeaveRequest::where('employee_id', $employee->id)
+            ->whereDate('start_date', '<=', $today)
+            ->whereDate('end_date', '>=', $today)
+            ->whereIn('status', ['approved', 'pending'])
+            ->exists();
+
+        // If employee applied for leave today, late check is completely bypassed!
+        if ($hasLeaveToday) {
+            $isLate = false;
+        }
 
         if ($isLate) {
             $reason = $request->input('reason') ?? $request->input('late_reason');
@@ -755,7 +794,7 @@ class EmployeePortalApiController extends ApiController
             ], 201);
         }
 
-        // On-time punch in (<= 10:00 AM)
+        // On-time punch in (<= 10:00 AM) or Leave-exempt punch in
         $timezone = $request->timezone;
 
         $log = AttendanceLog::create([
@@ -764,7 +803,7 @@ class EmployeePortalApiController extends ApiController
             'punch_in'            => Carbon::now($timezone),
             'status'              => 1,
             'log_status'          => 'IN',
-            'attendance_status'   => 'present',
+            'attendance_status'   => $hasLeaveToday ? 'half_day' : 'present',
             'punch_in_latitude'   => $request->punch_in_latitude,
             'punch_in_longitude'  => $request->punch_in_longitude,
             'punch_in_address'    => $request->punch_in_address,
@@ -773,10 +812,11 @@ class EmployeePortalApiController extends ApiController
 
         return response()->json([
             'status'  => 'success',
-            'message' => 'Punched in successfully.',
+            'message' => $hasLeaveToday ? 'Punched in successfully (Leave session).' : 'Punched in successfully.',
             'data'    => [
                 'attendance'      => $log,
                 'is_late'         => false,
+                'has_leave_today' => $hasLeaveToday,
                 'cutoff_time'     => $lateCutoffTime,
                 'punch_in_time'   => Carbon::now($timezone)->format('h:i A'),
                 'raw_punch_in'    => Carbon::now($timezone)->toDateTimeString(),
