@@ -789,22 +789,41 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::apiResource('sales/customers.contact-persons', ContactPersonApiController::class);
 
         // Root alias (/api/admin/accounts/customers)
+        Route::get('customers/export', [AccountsCustomerApiController::class, 'export']);
+        Route::get('customers/export/excel', [AccountsCustomerApiController::class, 'exportExcel']);
+        Route::get('customers/export/pdf', [AccountsCustomerApiController::class, 'exportPdf']);
+        Route::post('customers/import', [AccountsCustomerApiController::class, 'import']);
         Route::get('customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
-        Route::apiResource('customers',AccountsCustomerApiController::class);
+        Route::apiResource('customers', AccountsCustomerApiController::class);
         Route::apiResource('customers.contact-persons', ContactPersonApiController::class);
     });
 });
 
 // Accounts Module also accessible at /api/accounts/... (direct prefix)
 Route::group(['middleware' => 'auth:api', 'prefix' => 'accounts'], function () {
+    // Revenue Customers
+    Route::get('revenue/customers/export', [AccountsCustomerApiController::class, 'export']);
+    Route::get('revenue/customers/export/excel', [AccountsCustomerApiController::class, 'exportExcel']);
+    Route::get('revenue/customers/export/pdf', [AccountsCustomerApiController::class, 'exportPdf']);
+    Route::post('revenue/customers/import', [AccountsCustomerApiController::class, 'import']);
     Route::get('revenue/customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
     Route::apiResource('revenue/customers', AccountsCustomerApiController::class);
     Route::apiResource('revenue/customers.contact-persons', ContactPersonApiController::class);
 
+    // Sales Customers alias
+    Route::get('sales/customers/export', [AccountsCustomerApiController::class, 'export']);
+    Route::get('sales/customers/export/excel', [AccountsCustomerApiController::class, 'exportExcel']);
+    Route::get('sales/customers/export/pdf', [AccountsCustomerApiController::class, 'exportPdf']);
+    Route::post('sales/customers/import', [AccountsCustomerApiController::class, 'import']);
     Route::get('sales/customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
     Route::apiResource('sales/customers', AccountsCustomerApiController::class);
     Route::apiResource('sales/customers.contact-persons', ContactPersonApiController::class);
 
+    // Direct /customers alias
+    Route::get('customers/export', [AccountsCustomerApiController::class, 'export']);
+    Route::get('customers/export/excel', [AccountsCustomerApiController::class, 'exportExcel']);
+    Route::get('customers/export/pdf', [AccountsCustomerApiController::class, 'exportPdf']);
+    Route::post('customers/import', [AccountsCustomerApiController::class, 'import']);
     Route::get('customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
     Route::apiResource('customers', AccountsCustomerApiController::class);
     Route::apiResource('customers.contact-persons', ContactPersonApiController::class);
