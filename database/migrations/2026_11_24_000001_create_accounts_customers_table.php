@@ -15,26 +15,30 @@ return new class extends Migration
             $table->id();
             $table->foreignId('company_id')->nullable()->constrained('companies')->nullOnDelete();
 
-            // Basic Information
+            // ── Basic Information ─────────────────────────────────────────────
             $table->string('customer_type', 50)->default('Business'); // Business | Individual
             $table->string('salutation', 20)->nullable(); // Mr., Mrs., Ms., Miss, Dr.
             $table->string('first_name', 100)->nullable();
             $table->string('last_name', 100)->nullable();
             $table->string('company_name', 255)->nullable();
-            $table->string('display_name', 255); // Required
+            $table->string('display_name', 255); // Plain text input (Required)
             $table->string('email', 255)->nullable();
+            $table->string('country', 100)->default('India'); // Country * dropdown in Basic info
             $table->string('work_phone', 50)->nullable();
             $table->string('mobile', 50)->nullable();
 
-            // Tab 1: Other details
-            $table->string('pan', 50)->nullable();
-            $table->string('currency', 50)->default('INR- Indian Rupee');
-            $table->string('receivable_account', 100)->default('Accounts Receivable');
+            // ── Tab 1: Other Details ──────────────────────────────────────────
+            $table->string('gstin_pan', 50)->nullable(); // Labelled "GSTIN / PAN"
+            $table->string('pan', 50)->nullable(); // Compatibility alias
+            $table->json('currencies')->nullable(); // Selected currency pills: e.g. ["INR", "USD"]
+            $table->string('base_currency', 20)->default('INR'); // Base Currency dropdown
+            $table->json('exchange_rates')->nullable(); // e.g. {"USD": 0.00, "EUR": 0.00, "GBP": 0.00, ...}
             $table->decimal('opening_balance', 15, 2)->default(0.00);
-            $table->string('payment_terms', 100)->default('Due on Receipt');
+            $table->string('payment_terms', 100)->default('Due on receipt');
+            $table->string('receivable_account', 100)->default('Accounts Receivable');
             $table->boolean('portal_access')->default(false);
 
-            // Tab 2: Address Details
+            // ── Tab 2: Address Details ────────────────────────────────────────
             // Billing Address
             $table->string('billing_attention', 255)->nullable();
             $table->string('billing_country', 100)->nullable();
@@ -57,16 +61,10 @@ return new class extends Migration
             $table->string('shipping_phone', 50)->nullable();
             $table->string('shipping_fax', 50)->nullable();
 
-            // Tab 3: Contact Persons (JSON list of contact person objects)
+            // ── Tab 3: Contact Persons (JSON backup/quick access) ──────────────
             $table->json('contact_persons')->nullable();
 
-            // Tab 4: Custom Fields (JSON)
-            $table->json('custom_fields')->nullable();
-
-            // Tab 5: Reporting Tags (JSON)
-            $table->json('reporting_tags')->nullable();
-
-            // Tab 6: Remarks
+            // ── Tab 4: Remarks (Internal notes) ───────────────────────────────
             $table->text('remarks')->nullable();
 
             // Audit

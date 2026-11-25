@@ -13,6 +13,8 @@ use App\Http\Controllers\Api\Admin\TaskApiController;
 use App\Http\Controllers\Api\Admin\HolidayApiController;
 use App\Http\Controllers\Api\Admin\DashboardApiController;
 use App\Http\Controllers\Api\Admin\PartyApiController;
+use App\Http\Controllers\Api\Admin\Accounts\ContactPersonApiController;
+use App\Http\Controllers\Api\Admin\Accounts\CustomerApiController as AccountsCustomerApiController;
 use App\Http\Controllers\Api\Admin\DocumentApiController;
 use App\Http\Controllers\Api\Admin\FolderApiController;
 use App\Http\Controllers\Api\Admin\LeaveApiController;
@@ -777,29 +779,35 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     // =========================================================================
     Route::prefix('accounts')->group(function () {
         // Revenue -> Customers (Primary endpoint requested: /api/admin/accounts/revenue/customers)
-        Route::get('revenue/customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
-        Route::apiResource('revenue/customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+        Route::get('revenue/customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
+        Route::apiResource('revenue/customers', AccountsCustomerApiController::class);
+        Route::apiResource('revenue/customers.contact-persons', ContactPersonApiController::class);
 
         // Sales alias for frontend compatibility (/api/admin/accounts/sales/customers)
-        Route::get('sales/customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
-        Route::apiResource('sales/customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+        Route::get('sales/customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
+        Route::apiResource('sales/customers', AccountsCustomerApiController::class);
+        Route::apiResource('sales/customers.contact-persons', ContactPersonApiController::class);
 
         // Root alias (/api/admin/accounts/customers)
-        Route::get('customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
-        Route::apiResource('customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+        Route::get('customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
+        Route::apiResource('customers',AccountsCustomerApiController::class);
+        Route::apiResource('customers.contact-persons', ContactPersonApiController::class);
     });
 });
 
 // Accounts Module also accessible at /api/accounts/... (direct prefix)
 Route::group(['middleware' => 'auth:api', 'prefix' => 'accounts'], function () {
-    Route::get('revenue/customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
-    Route::apiResource('revenue/customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+    Route::get('revenue/customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
+    Route::apiResource('revenue/customers', AccountsCustomerApiController::class);
+    Route::apiResource('revenue/customers.contact-persons', ContactPersonApiController::class);
 
-    Route::get('sales/customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
-    Route::apiResource('sales/customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+    Route::get('sales/customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
+    Route::apiResource('sales/customers', AccountsCustomerApiController::class);
+    Route::apiResource('sales/customers.contact-persons', ContactPersonApiController::class);
 
-    Route::get('customers/form-options', [\App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class, 'formOptions']);
-    Route::apiResource('customers', \App\Http\Controllers\Api\Admin\Accounts\CustomerApiController::class);
+    Route::get('customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
+    Route::apiResource('customers', AccountsCustomerApiController::class);
+    Route::apiResource('customers.contact-persons', ContactPersonApiController::class);
 });
 
 

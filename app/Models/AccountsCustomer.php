@@ -21,10 +21,14 @@ class AccountsCustomer extends Model
         'company_name',
         'display_name',
         'email',
+        'country',
         'work_phone',
         'mobile',
+        'gstin_pan',
         'pan',
-        'currency',
+        'currencies',
+        'base_currency',
+        'exchange_rates',
         'receivable_account',
         'opening_balance',
         'payment_terms',
@@ -48,8 +52,6 @@ class AccountsCustomer extends Model
         'shipping_phone',
         'shipping_fax',
         'contact_persons',
-        'custom_fields',
-        'reporting_tags',
         'remarks',
         'created_by',
         'updated_by',
@@ -57,25 +59,23 @@ class AccountsCustomer extends Model
 
     protected $casts = [
         'opening_balance' => 'decimal:2',
-        'portal_access'   => 'boolean',
+        'portal_access' => 'boolean',
+        'currencies' => 'array',
+        'exchange_rates' => 'array',
         'contact_persons' => 'array',
-        'custom_fields'   => 'array',
-        'reporting_tags'  => 'array',
     ];
 
     protected $appends = [
         'billing_address',
         'shipping_address',
-        'billingAddress',
-        'shippingAddress',
-        'contactPersons',
-        'customFields',
-        'reportingTags',
         'displayName',
         'firstName',
         'lastName',
         'companyName',
         'workPhone',
+        'gstinPan',
+        'baseCurrency',
+        'exchangeRates',
         'receivableAccount',
         'openingBalance',
         'paymentTerms',
@@ -87,14 +87,14 @@ class AccountsCustomer extends Model
     {
         return [
             'attention' => $this->billing_attention ?? '',
-            'country'   => $this->billing_country ?? '',
-            'street1'   => $this->billing_street1 ?? '',
-            'street2'   => $this->billing_street2 ?? '',
-            'city'      => $this->billing_city ?? '',
-            'state'     => $this->billing_state ?? '',
-            'pinCode'   => $this->billing_pin_code ?? '',
-            'phone'     => $this->billing_phone ?? '',
-            'fax'       => $this->billing_fax ?? '',
+            'country' => $this->billing_country ?? ($this->country ?? ''),
+            'street1' => $this->billing_street1 ?? '',
+            'street2' => $this->billing_street2 ?? '',
+            'city' => $this->billing_city ?? '',
+            'state' => $this->billing_state ?? '',
+            'pinCode' => $this->billing_pin_code ?? '',
+            'phone' => $this->billing_phone ?? '',
+            'fax' => $this->billing_fax ?? '',
         ];
     }
 
@@ -102,24 +102,18 @@ class AccountsCustomer extends Model
     {
         return [
             'attention' => $this->shipping_attention ?? '',
-            'country'   => $this->shipping_country ?? '',
-            'street1'   => $this->shipping_street1 ?? '',
-            'street2'   => $this->shipping_street2 ?? '',
-            'city'      => $this->shipping_city ?? '',
-            'state'     => $this->shipping_state ?? '',
-            'pinCode'   => $this->shipping_pin_code ?? '',
-            'phone'     => $this->shipping_phone ?? '',
-            'fax'       => $this->shipping_fax ?? '',
+            'country' => $this->shipping_country ?? ($this->country ?? ''),
+            'street1' => $this->shipping_street1 ?? '',
+            'street2' => $this->shipping_street2 ?? '',
+            'city' => $this->shipping_city ?? '',
+            'state' => $this->shipping_state ?? '',
+            'pinCode' => $this->shipping_pin_code ?? '',
+            'phone' => $this->shipping_phone ?? '',
+            'fax' => $this->shipping_fax ?? '',
         ];
     }
 
-    // CamelCase aliases for frontend state compatibility
     public function getBillingAddressAttributeCamel(): array
-    {
-        return $this->getBillingAddressAttribute();
-    }
-
-    public function getBillingAddress(): array
     {
         return $this->getBillingAddressAttribute();
     }
@@ -149,6 +143,34 @@ class AccountsCustomer extends Model
         return $this->attributes['work_phone'] ?? null;
     }
 
+    public function getGstinPanAttribute(): ?string
+    {
+        return $this->attributes['gstin_pan'] ?? ($this->attributes['pan'] ?? null);
+    }
+
+    public function getBaseCurrencyAttribute(): string
+    {
+        return $this->attributes['base_currency'] ?? 'INR';
+    }
+
+    public function getExchangeRatesAttribute(): array
+    {
+        $raw = $this->attributes['exchange_rates'] ?? null;
+        if (is_string($raw)) {
+            return json_decode($raw, true) ?: [];
+        }
+        return is_array($raw) ? $raw : [
+            'USD' => 0.00,
+            'EUR' => 0.00,
+            'GBP' => 0.00,
+            'AED' => 0.00,
+            'SAR' => 0.00,
+            'JPY' => 0.00,
+            'RUB' => 0.00,
+            'CNY' => 0.00,
+        ];
+    }
+
     public function getReceivableAccountAttribute(): ?string
     {
         return $this->attributes['receivable_account'] ?? 'Accounts Receivable';
@@ -161,7 +183,7 @@ class AccountsCustomer extends Model
 
     public function getPaymentTermsAttribute(): ?string
     {
-        return $this->attributes['payment_terms'] ?? 'Due on Receipt';
+        return $this->attributes['payment_terms'] ?? 'Due on receipt';
     }
 
     public function getPortalAccessAttribute(): bool
@@ -169,34 +191,12 @@ class AccountsCustomer extends Model
         return (bool) ($this->attributes['portal_access'] ?? false);
     }
 
-    public function getContactPersonsAttribute(): array
-    {
-        $raw = $this->attributes['contact_persons'] ?? null;
-        if (is_string($raw)) {
-            return json_decode($raw, true) ?: [];
-        }
-        return is_array($raw) ? $raw : [];
-    }
-
-    public function getCustomFieldsAttribute(): array
-    {
-        $raw = $this->attributes['custom_fields'] ?? null;
-        if (is_string($raw)) {
-            return json_decode($raw, true) ?: [];
-        }
-        return is_array($raw) ? $raw : [];
-    }
-
-    public function getReportingTagsAttribute(): array
-    {
-        $raw = $this->attributes['reporting_tags'] ?? null;
-        if (is_string($raw)) {
-            return json_decode($raw, true) ?: [];
-        }
-        return is_array($raw) ? $raw : [];
-    }
-
     // Relationships
+    public function contactPersons()
+    {
+        return $this->hasMany(AccountsCustomerContactPerson::class, 'customer_id');
+    }
+
     public function company()
     {
         return $this->belongsTo(Company::class);

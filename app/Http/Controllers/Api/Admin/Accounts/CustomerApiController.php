@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin\Accounts;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Models\AccountsCustomer;
+use App\Models\AccountsCustomerContactPerson;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -16,26 +17,33 @@ class CustomerApiController extends ApiController
     {
         $query = AccountsCustomer::query()->latest();
 
+        try {
+            $query->with('contactPersons');
+        } catch (\Throwable $e) {
+            // Safe fallback if relation table is not yet migrated
+        }
+
         // Multi-tenant check
         $user = auth('api')->user();
         if ($user && $user->company_id) {
             $query->where(function ($q) use ($user) {
                 $q->where('company_id', $user->company_id)
-                  ->orWhereNull('company_id');
+                    ->orWhereNull('company_id');
             });
         }
 
-        // Search by name, company, email, phone
+        // Search by name, company, email, phone, country
         if ($request->filled('search')) {
             $search = trim($request->search);
             $query->where(function ($q) use ($search) {
                 $q->where('display_name', 'like', "%{$search}%")
-                  ->orWhere('company_name', 'like', "%{$search}%")
-                  ->orWhere('first_name', 'like', "%{$search}%")
-                  ->orWhere('last_name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%")
-                  ->orWhere('mobile', 'like', "%{$search}%")
-                  ->orWhere('work_phone', 'like', "%{$search}%");
+                    ->orWhere('company_name', 'like', "%{$search}%")
+                    ->orWhere('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('country', 'like', "%{$search}%")
+                    ->orWhere('mobile', 'like', "%{$search}%")
+                    ->orWhere('work_phone', 'like', "%{$search}%");
             });
         }
 
@@ -52,44 +60,48 @@ class CustomerApiController extends ApiController
 
     /**
      * Store a newly created customer.
+     * Note: display_name is a text box (required).
      */
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
+        $request->validate([
             'display_name' => 'required_without:displayName|string|max:255',
-            'displayName'  => 'nullable|string|max:255',
-            'type'         => 'nullable|in:Business,Individual,business,individual',
-            'customer_type'=> 'nullable|in:Business,Individual,business,individual',
-            'email'        => 'nullable|email|max:255',
-            'salutation'   => 'nullable|string|max:20',
-            'first_name'   => 'nullable|string|max:100',
-            'firstName'    => 'nullable|string|max:100',
-            'last_name'    => 'nullable|string|max:100',
-            'lastName'     => 'nullable|string|max:100',
+            'displayName' => 'nullable|string|max:255',
+            'type' => 'nullable|in:Business,Individual,business,individual',
+            'customer_type' => 'nullable|in:Business,Individual,business,individual',
+            'salutation' => 'nullable|string|max:20',
+            'first_name' => 'nullable|string|max:100',
+            'firstName' => 'nullable|string|max:100',
+            'last_name' => 'nullable|string|max:100',
+            'lastName' => 'nullable|string|max:100',
             'company_name' => 'nullable|string|max:255',
-            'companyName'  => 'nullable|string|max:255',
-            'work_phone'   => 'nullable|string|max:50',
-            'workPhone'    => 'nullable|string|max:50',
-            'mobile'       => 'nullable|string|max:50',
-            'pan'          => 'nullable|string|max:50',
-            'currency'     => 'nullable|string|max:50',
+            'companyName' => 'nullable|string|max:255',
+            'email' => 'nullable|email|max:255',
+            'country' => 'nullable|string|max:100',
+            'work_phone' => 'nullable|string|max:50',
+            'workPhone' => 'nullable|string|max:50',
+            'mobile' => 'nullable|string|max:50',
+            'gstin_pan' => 'nullable|string|max:50',
+            'gstinPan' => 'nullable|string|max:50',
+            'pan' => 'nullable|string|max:50',
+            'currencies' => 'nullable|array',
+            'base_currency' => 'nullable|string|max:20',
+            'baseCurrency' => 'nullable|string|max:20',
+            'exchange_rates' => 'nullable|array',
+            'exchangeRates' => 'nullable|array',
             'opening_balance' => 'nullable|numeric',
-            'openingBalance'  => 'nullable|numeric',
-            'payment_terms'   => 'nullable|string|max:100',
-            'paymentTerms'    => 'nullable|string|max:100',
-            'portal_access'   => 'nullable|boolean',
-            'portalAccess'    => 'nullable|boolean',
-            'remarks'         => 'nullable|string',
-            'billingAddress'  => 'nullable|array',
+            'openingBalance' => 'nullable|numeric',
+            'payment_terms' => 'nullable|string|max:100',
+            'paymentTerms' => 'nullable|string|max:100',
+            'portal_access' => 'nullable|boolean',
+            'portalAccess' => 'nullable|boolean',
+            'remarks' => 'nullable|string',
+            'billingAddress' => 'nullable|array',
             'shippingAddress' => 'nullable|array',
             'billing_address' => 'nullable|array',
-            'shipping_address'=> 'nullable|array',
-            'contactPersons'  => 'nullable|array',
+            'shipping_address' => 'nullable|array',
+            'contactPersons' => 'nullable|array',
             'contact_persons' => 'nullable|array',
-            'customFields'    => 'nullable|array',
-            'custom_fields'   => 'nullable|array',
-            'reportingTags'   => 'nullable|array',
-            'reporting_tags'  => 'nullable|array',
         ]);
 
         $payload = $this->formatCustomerPayload($request);
@@ -102,6 +114,16 @@ class CustomerApiController extends ApiController
 
         $customer = AccountsCustomer::create($payload);
 
+        // Save Contact Persons if provided
+        $contactPersonsList = $request->input('contactPersons') ?? $request->input('contact_persons');
+        if (is_array($contactPersonsList) && count($contactPersonsList) > 0) {
+            $this->syncContactPersons($customer, $contactPersonsList);
+        }
+
+        try {
+            $customer->load('contactPersons');
+        } catch (\Throwable $e) {}
+
         return $this->success($customer, 'Customer created successfully', 201);
     }
 
@@ -110,7 +132,11 @@ class CustomerApiController extends ApiController
      */
     public function show($id): JsonResponse
     {
-        $customer = AccountsCustomer::with(['company', 'creator', 'updater'])->find($id);
+        try {
+            $customer = AccountsCustomer::with(['contactPersons', 'company', 'creator', 'updater'])->find($id);
+        } catch (\Throwable $e) {
+            $customer = AccountsCustomer::with(['company', 'creator', 'updater'])->find($id);
+        }
 
         if (!$customer) {
             return $this->error('Customer not found', 404);
@@ -132,10 +158,11 @@ class CustomerApiController extends ApiController
 
         $request->validate([
             'display_name' => 'nullable|string|max:255',
-            'displayName'  => 'nullable|string|max:255',
-            'email'        => 'nullable|email|max:255',
-            'type'         => 'nullable|in:Business,Individual,business,individual',
-            'customer_type'=> 'nullable|in:Business,Individual,business,individual',
+            'displayName' => 'nullable|string|max:255',
+            'email' => 'nullable|email|max:255',
+            'country' => 'nullable|string|max:100',
+            'type' => 'nullable|in:Business,Individual,business,individual',
+            'customer_type' => 'nullable|in:Business,Individual,business,individual',
         ]);
 
         $payload = $this->formatCustomerPayload($request, $customer);
@@ -147,7 +174,18 @@ class CustomerApiController extends ApiController
 
         $customer->update($payload);
 
-        return $this->success($customer->fresh(), 'Customer updated successfully');
+        // Sync contact persons if provided
+        $contactPersonsList = $request->input('contactPersons') ?? $request->input('contact_persons');
+        if (is_array($contactPersonsList)) {
+            $this->syncContactPersons($customer, $contactPersonsList);
+        }
+
+        $fresh = $customer->fresh();
+        try {
+            $fresh->load('contactPersons');
+        } catch (\Throwable $e) {}
+
+        return $this->success($fresh, 'Customer updated successfully');
     }
 
     /**
@@ -161,6 +199,8 @@ class CustomerApiController extends ApiController
             return $this->error('Customer not found', 404);
         }
 
+        // Delete associated contact persons
+        $customer->contactPersons()->delete();
         $customer->delete();
 
         return $this->success(null, 'Customer deleted successfully');
@@ -184,17 +224,42 @@ class CustomerApiController extends ApiController
                 ['value' => 'Individual', 'label' => 'Individual'],
             ],
             'currencies' => [
-                ['value' => 'INR- Indian Rupee', 'label' => 'INR — Indian Rupee', 'code' => 'INR', 'symbol' => '₹'],
-                ['value' => 'USD- US Dollar', 'label' => 'USD — US Dollar', 'code' => 'USD', 'symbol' => '$'],
-                ['value' => 'EUR- Euro', 'label' => 'EUR — Euro', 'code' => 'EUR', 'symbol' => '€'],
-                ['value' => 'AED- UAE Dirham', 'label' => 'AED — UAE Dirham', 'code' => 'AED', 'symbol' => 'AED'],
-                ['value' => 'GBP- British Pound', 'label' => 'GBP — British Pound', 'code' => 'GBP', 'symbol' => '£'],
+                ['code' => 'INR', 'label' => 'INR', 'symbol' => '₹', 'name' => 'Indian Rupee'],
+                ['code' => 'USD', 'label' => 'USD', 'symbol' => '$', 'name' => 'US Dollar'],
+                ['code' => 'EUR', 'label' => 'EUR', 'symbol' => '€', 'name' => 'Euro'],
+                ['code' => 'GBP', 'label' => 'GBP', 'symbol' => '£', 'name' => 'British Pound'],
+                ['code' => 'AED', 'label' => 'AED', 'symbol' => 'AED', 'name' => 'UAE Dirham'],
+                ['code' => 'SAR', 'label' => 'SAR', 'symbol' => 'SAR', 'name' => 'Saudi Riyal'],
+                ['code' => 'JPY', 'label' => 'JPY', 'symbol' => '¥', 'name' => 'Japanese Yen'],
+                ['code' => 'RUB', 'label' => 'RUB', 'symbol' => '₽', 'name' => 'Russian Ruble'],
+                ['code' => 'CNY', 'label' => 'CNY', 'symbol' => '¥', 'name' => 'Chinese Yuan'],
+            ],
+            'base_currencies' => [
+                ['value' => 'INR', 'label' => 'INR — Indian Rupee'],
+                ['value' => 'USD', 'label' => 'USD — US Dollar'],
+                ['value' => 'EUR', 'label' => 'EUR — Euro'],
+                ['value' => 'GBP', 'label' => 'GBP — British Pound'],
+                ['value' => 'AED', 'label' => 'AED — UAE Dirham'],
+                ['value' => 'SAR', 'label' => 'SAR — Saudi Riyal'],
+                ['value' => 'JPY', 'label' => 'JPY — Japanese Yen'],
+                ['value' => 'RUB', 'label' => 'RUB — Russian Ruble'],
+                ['value' => 'CNY', 'label' => 'CNY — Chinese Yuan'],
+            ],
+            'default_exchange_rates' => [
+                'USD' => 0.00,
+                'EUR' => 0.00,
+                'GBP' => 0.00,
+                'AED' => 0.00,
+                'SAR' => 0.00,
+                'JPY' => 0.00,
+                'RUB' => 0.00,
+                'CNY' => 0.00,
             ],
             'accounts_receivable' => [
                 ['value' => 'Accounts Receivable', 'label' => 'Accounts Receivable'],
             ],
             'payment_terms' => [
-                ['value' => 'Due on Receipt', 'label' => 'Due on receipt'],
+                ['value' => 'Due on receipt', 'label' => 'Due on receipt'],
                 ['value' => 'Net 15', 'label' => 'Net 15'],
                 ['value' => 'Net 30', 'label' => 'Net 30'],
                 ['value' => 'Net 45', 'label' => 'Net 45'],
@@ -213,6 +278,11 @@ class CustomerApiController extends ApiController
                 'Canada',
                 'Australia',
                 'Singapore',
+                'China',
+                'Japan',
+                'Russia',
+                'Germany',
+                'France',
             ],
         ]);
     }
@@ -227,75 +297,131 @@ class CustomerApiController extends ApiController
         $customerType = $request->input('type') ?? $request->input('customer_type') ?? ($existing?->customer_type ?? 'Business');
         $customerType = ucfirst(strtolower($customerType));
 
+        $country = $request->input('country', $existing?->country ?? 'India');
+
+        $gstinPan = $request->input('gstinPan')
+            ?? $request->input('gstin_pan')
+            ?? $request->input('pan')
+            ?? $existing?->gstin_pan;
+
+        $currencies = $request->input('currencies');
+        if (!is_null($currencies)) {
+            $currencies = is_array($currencies) ? $currencies : [$currencies];
+        } else {
+            $currencies = $existing?->currencies ?? ['INR'];
+        }
+
+        $baseCurrency = $request->input('baseCurrency')
+            ?? $request->input('base_currency')
+            ?? $existing?->base_currency
+            ?? 'INR';
+
+        $exchangeRates = $request->input('exchangeRates')
+            ?? $request->input('exchange_rates')
+            ?? $existing?->exchange_rates
+            ?? [
+                'USD' => 0.00,
+                'EUR' => 0.00,
+                'GBP' => 0.00,
+                'AED' => 0.00,
+                'SAR' => 0.00,
+                'JPY' => 0.00,
+                'RUB' => 0.00,
+                'CNY' => 0.00,
+            ];
+
         $payload = [
             'customer_type' => $customerType,
-            'salutation'    => $request->input('salutation', $existing?->salutation),
-            'first_name'    => $request->input('firstName') ?? $request->input('first_name', $existing?->first_name),
-            'last_name'     => $request->input('lastName') ?? $request->input('last_name', $existing?->last_name),
-            'company_name'  => $request->input('companyName') ?? $request->input('company_name', $existing?->company_name),
-            'display_name'  => $displayName,
-            'email'         => $request->input('email', $existing?->email),
-            'work_phone'    => $request->input('workPhone') ?? $request->input('work_phone', $existing?->work_phone),
-            'mobile'        => $request->input('mobile', $existing?->mobile),
+            'salutation' => $request->input('salutation', $existing?->salutation),
+            'first_name' => $request->input('firstName') ?? $request->input('first_name', $existing?->first_name),
+            'last_name' => $request->input('lastName') ?? $request->input('last_name', $existing?->last_name),
+            'company_name' => $request->input('companyName') ?? $request->input('company_name', $existing?->company_name),
+            'display_name' => $displayName,
+            'email' => $request->input('email', $existing?->email),
+            'country' => $country,
+            'work_phone' => $request->input('workPhone') ?? $request->input('work_phone', $existing?->work_phone),
+            'mobile' => $request->input('mobile', $existing?->mobile),
 
             // Tab 1: Other details
-            'pan'               => $request->input('pan', $existing?->pan),
-            'currency'          => $request->input('currency', $existing?->currency ?? 'INR- Indian Rupee'),
-            'receivable_account'=> $request->input('receivableAccount') ?? $request->input('receivable_account', $existing?->receivable_account ?? 'Accounts Receivable'),
-            'opening_balance'   => (float) ($request->input('openingBalance') ?? $request->input('opening_balance', $existing?->opening_balance ?? 0)),
-            'payment_terms'     => $request->input('paymentTerms') ?? $request->input('payment_terms', $existing?->payment_terms ?? 'Due on Receipt'),
-            'portal_access'     => (bool) ($request->input('portalAccess') ?? $request->input('portal_access', $existing?->portal_access ?? false)),
+            'gstin_pan' => $gstinPan,
+            'pan' => $gstinPan,
+            'currencies' => $currencies,
+            'base_currency' => $baseCurrency,
+            'exchange_rates' => $exchangeRates,
+            'receivable_account' => $request->input('receivableAccount') ?? $request->input('receivable_account', $existing?->receivable_account ?? 'Accounts Receivable'),
+            'opening_balance' => (float) ($request->input('openingBalance') ?? $request->input('opening_balance', $existing?->opening_balance ?? 0)),
+            'payment_terms' => $request->input('paymentTerms') ?? $request->input('payment_terms', $existing?->payment_terms ?? 'Due on receipt'),
+            'portal_access' => (bool) ($request->input('portalAccess') ?? $request->input('portal_access', $existing?->portal_access ?? false)),
 
-            // Remarks
-            'remarks'           => $request->input('remarks', $existing?->remarks),
+            // Tab 4: Remarks
+            'remarks' => $request->input('remarks', $existing?->remarks),
         ];
 
         // Tab 2: Billing Address
         $billing = $request->input('billingAddress') ?? $request->input('billing_address') ?? [];
         if (is_array($billing)) {
             $payload['billing_attention'] = $billing['attention'] ?? $request->input('billing_attention', $existing?->billing_attention);
-            $payload['billing_country']   = $billing['country'] ?? $request->input('billing_country', $existing?->billing_country);
-            $payload['billing_street1']   = $billing['street1'] ?? $request->input('billing_street1', $existing?->billing_street1);
-            $payload['billing_street2']   = $billing['street2'] ?? $request->input('billing_street2', $existing?->billing_street2);
-            $payload['billing_city']      = $billing['city'] ?? $request->input('billing_city', $existing?->billing_city);
-            $payload['billing_state']     = $billing['state'] ?? $request->input('billing_state', $existing?->billing_state);
-            $payload['billing_pin_code']  = $billing['pinCode'] ?? $billing['pin_code'] ?? $request->input('billing_pin_code', $existing?->billing_pin_code);
-            $payload['billing_phone']     = $billing['phone'] ?? $request->input('billing_phone', $existing?->billing_phone);
-            $payload['billing_fax']       = $billing['fax'] ?? $request->input('billing_fax', $existing?->billing_fax);
+            $payload['billing_country'] = $billing['country'] ?? $country;
+            $payload['billing_street1'] = $billing['street1'] ?? $request->input('billing_street1', $existing?->billing_street1);
+            $payload['billing_street2'] = $billing['street2'] ?? $request->input('billing_street2', $existing?->billing_street2);
+            $payload['billing_city'] = $billing['city'] ?? $request->input('billing_city', $existing?->billing_city);
+            $payload['billing_state'] = $billing['state'] ?? $request->input('billing_state', $existing?->billing_state);
+            $payload['billing_pin_code'] = $billing['pinCode'] ?? $billing['pin_code'] ?? $request->input('billing_pin_code', $existing?->billing_pin_code);
+            $payload['billing_phone'] = $billing['phone'] ?? $request->input('billing_phone', $existing?->billing_phone);
+            $payload['billing_fax'] = $billing['fax'] ?? $request->input('billing_fax', $existing?->billing_fax);
         }
 
         // Tab 2: Shipping Address
         $shipping = $request->input('shippingAddress') ?? $request->input('shipping_address') ?? [];
         if (is_array($shipping)) {
             $payload['shipping_attention'] = $shipping['attention'] ?? $request->input('shipping_attention', $existing?->shipping_attention);
-            $payload['shipping_country']   = $shipping['country'] ?? $request->input('shipping_country', $existing?->shipping_country);
-            $payload['shipping_street1']   = $shipping['street1'] ?? $request->input('shipping_street1', $existing?->shipping_street1);
-            $payload['shipping_street2']   = $shipping['street2'] ?? $request->input('shipping_street2', $existing?->shipping_street2);
-            $payload['shipping_city']      = $shipping['city'] ?? $request->input('shipping_city', $existing?->shipping_city);
-            $payload['shipping_state']     = $shipping['state'] ?? $request->input('shipping_state', $existing?->shipping_state);
-            $payload['shipping_pin_code']  = $shipping['pinCode'] ?? $shipping['pin_code'] ?? $request->input('shipping_pin_code', $existing?->shipping_pin_code);
-            $payload['shipping_phone']     = $shipping['phone'] ?? $request->input('shipping_phone', $existing?->shipping_phone);
-            $payload['shipping_fax']       = $shipping['fax'] ?? $request->input('shipping_fax', $existing?->shipping_fax);
-        }
-
-        // Tab 3: Contact Persons
-        $contactPersons = $request->input('contactPersons') ?? $request->input('contact_persons');
-        if (!is_null($contactPersons)) {
-            $payload['contact_persons'] = is_array($contactPersons) ? $contactPersons : [];
-        }
-
-        // Tab 4: Custom Fields
-        $customFields = $request->input('customFields') ?? $request->input('custom_fields');
-        if (!is_null($customFields)) {
-            $payload['custom_fields'] = is_array($customFields) ? $customFields : [];
-        }
-
-        // Tab 5: Reporting Tags
-        $reportingTags = $request->input('reportingTags') ?? $request->input('reporting_tags');
-        if (!is_null($reportingTags)) {
-            $payload['reporting_tags'] = is_array($reportingTags) ? $reportingTags : [];
+            $payload['shipping_country'] = $shipping['country'] ?? $country;
+            $payload['shipping_street1'] = $shipping['street1'] ?? $request->input('shipping_street1', $existing?->shipping_street1);
+            $payload['shipping_street2'] = $shipping['street2'] ?? $request->input('shipping_street2', $existing?->shipping_street2);
+            $payload['shipping_city'] = $shipping['city'] ?? $request->input('shipping_city', $existing?->shipping_city);
+            $payload['shipping_state'] = $shipping['state'] ?? $request->input('shipping_state', $existing?->shipping_state);
+            $payload['shipping_pin_code'] = $shipping['pinCode'] ?? $shipping['pin_code'] ?? $request->input('shipping_pin_code', $existing?->shipping_pin_code);
+            $payload['shipping_phone'] = $shipping['phone'] ?? $request->input('shipping_phone', $existing?->shipping_phone);
+            $payload['shipping_fax'] = $shipping['fax'] ?? $request->input('shipping_fax', $existing?->shipping_fax);
         }
 
         return $payload;
+    }
+
+    /**
+     * Synchronize contact persons table and customer JSON backup.
+     */
+    private function syncContactPersons(AccountsCustomer $customer, array $persons): void
+    {
+        $savedPersons = [];
+
+        foreach ($persons as $p) {
+            if (empty($p) || (!isset($p['firstName']) && !isset($p['first_name']) && !isset($p['email']))) {
+                continue;
+            }
+
+            $personData = [
+                'salutation' => $p['salutation'] ?? null,
+                'first_name' => $p['firstName'] ?? ($p['first_name'] ?? null),
+                'last_name' => $p['lastName'] ?? ($p['last_name'] ?? null),
+                'email' => $p['email'] ?? null,
+                'work_phone' => $p['workPhone'] ?? ($p['work_phone'] ?? null),
+                'mobile' => $p['mobile'] ?? null,
+            ];
+
+            if (!empty($p['id'])) {
+                $contact = AccountsCustomerContactPerson::where('customer_id', $customer->id)->find($p['id']);
+                if ($contact) {
+                    $contact->update($personData);
+                    $savedPersons[] = $contact->toArray();
+                    continue;
+                }
+            }
+
+            $contact = $customer->contactPersons()->create($personData);
+            $savedPersons[] = $contact->toArray();
+        }
+
+        $customer->update(['contact_persons' => $savedPersons]);
     }
 }
