@@ -467,6 +467,8 @@ class CustomerApiController extends ApiController
 
     /**
      * Export Accounts Customers to PDF.
+     * Supports passing specific headings/columns via query parameter 'columns' (e.g., columns[]=Name&columns[]=Email)
+     * to avoid table congestion.
      */
     public function exportPdf(Request $request)
     {
@@ -477,14 +479,22 @@ class CustomerApiController extends ApiController
         }
 
         $customers = $this->buildFilteredQuery($request)->get();
-        $rows = $this->prepareExportRows($customers);
-        $export = new AccountsCustomerExport($rows);
+        $requestedColumns = $request->input('columns');
+
+        if (!empty($requestedColumns) && is_array($requestedColumns)) {
+            [$headings, $rows] = $this->prepareCustomPdfRows($customers, $requestedColumns);
+        } else {
+            $export = new AccountsCustomerExport($this->prepareExportRows($customers));
+            $headings = $export->headings();
+            $rows = $export->array();
+        }
+
         $filename = 'accounts_customers_' . now()->format('YmdHis') . '.pdf';
 
         $pdf = Pdf::loadView('reports.generic_pdf', [
-            'data' => $export->array(),
-            'headings' => $export->headings(),
-            'title' => 'Accounts Customers Report',
+            'data'     => $rows,
+            'headings' => $headings,
+            'title'    => 'Accounts Customers Report',
         ])->setPaper('a4', 'landscape');
 
         return $pdf->download($filename);
@@ -602,6 +612,65 @@ class CustomerApiController extends ApiController
             ];
         }
         return $rows;
+    }
+
+    /**
+     * Map requested dynamic columns to customer fields for PDF generation.
+     */
+    private function prepareCustomPdfRows($customers, array $requestedColumns): array
+    {
+        $headings = [];
+        $columnKeys = [];
+
+        foreach ($requestedColumns as $col) {
+            $colName = trim((string) $col);
+            if ($colName === '') {
+                continue;
+            }
+            $headings[] = $colName;
+            $columnKeys[] = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $colName));
+        }
+
+        if (empty($headings)) {
+            $export = new AccountsCustomerExport($this->prepareExportRows($customers));
+            return [$export->headings(), $export->array()];
+        }
+
+        $rows = [];
+        foreach ($customers as $c) {
+            $row = [];
+            foreach ($columnKeys as $normKey) {
+                $row[] = match ($normKey) {
+                    'name', 'displayname', 'customername' => $c->display_name ?? '-',
+                    'firstname' => $c->first_name ?? '',
+                    'lastname' => $c->last_name ?? '',
+                    'email', 'emailaddress' => $c->email ?? '',
+                    'phone', 'workphone' => $c->work_phone ?? ($c->mobile ?? ''),
+                    'mobile', 'mobilephone' => $c->mobile ?? '',
+                    'companyname', 'company' => $c->company_name ?? '',
+                    'receivablesbcy', 'receivables' => isset($c->receivables) ? number_format((float) $c->receivables, 2) : '0.00',
+                    'unusedcreditsbcy', 'unusedcredits' => isset($c->unused_credits) ? number_format((float) $c->unused_credits, 2) : '0.00',
+                    'source', 'customersource' => $c->customer_source ?? ($c->source ?? '-'),
+                    'salutation' => $c->salutation ?? '',
+                    'customertype', 'type' => $c->customer_type ?? 'Business',
+                    'taxidpan', 'taxid', 'pan', 'gstinpan', 'gstin' => $c->gstin_pan ?? ($c->pan ?? ''),
+                    'currency', 'basecurrency' => $c->base_currency ?? 'INR',
+                    'paymentterms' => $c->payment_terms ?? 'Due on receipt',
+                    'portalaccess' => $c->portal_access ? 'Yes' : 'No',
+                    'openingbalance' => isset($c->opening_balance) ? number_format((float) $c->opening_balance, 2) : '0.00',
+                    'receivableaccount' => $c->receivable_account ?? 'Accounts Receivable',
+                    'createdat', 'created' => $c->created_at ? $c->created_at->format('Y-m-d') : '-',
+                    'country' => $c->country ?? 'India',
+                    'billingaddress' => trim(($c->billing_street1 ?? '') . ' ' . ($c->billing_city ?? '') . ' ' . ($c->billing_state ?? '')),
+                    'shippingaddress' => trim(($c->shipping_street1 ?? '') . ' ' . ($c->shipping_city ?? '') . ' ' . ($c->shipping_state ?? '')),
+                    'remarks', 'notes', 'internalnotes' => $c->remarks ?? '',
+                    default => $c->{$normKey} ?? ($c->getAttribute($normKey) ?? '-')
+                };
+            }
+            $rows[] = $row;
+        }
+
+        return [$headings, $rows];
     }
 
     /**
