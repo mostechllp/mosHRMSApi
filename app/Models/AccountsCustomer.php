@@ -65,22 +65,22 @@ class AccountsCustomer extends Model
         'contact_persons' => 'array',
     ];
 
-    protected $appends = [
-        'billing_address',
-        'shipping_address',
-        'displayName',
-        'firstName',
-        'lastName',
-        'companyName',
-        'workPhone',
-        'gstinPan',
-        'baseCurrency',
-        'exchangeRates',
-        'receivableAccount',
-        'openingBalance',
-        'paymentTerms',
-        'portalAccess',
-    ];
+    // protected $appends = [
+    //     'billing_address',
+    //     'shipping_address',
+    //     'displayName',
+    //     'firstName',
+    //     'lastName',
+    //     'companyName',
+    //     'workPhone',
+    //     'gstinPan',
+    //     'baseCurrency',
+    //     'exchangeRates',
+    //     'receivableAccount',
+    //     'openingBalance',
+    //     'paymentTerms',
+    //     'portalAccess',
+    // ];
 
     // Nested Address Accessors
     public function getBillingAddressAttribute(): array

@@ -126,7 +126,8 @@ class CustomerApiController extends ApiController
 
         try {
             $customer->load('contactPersons');
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+        }
 
         return $this->success($customer, 'Customer created successfully', 201);
     }
@@ -187,7 +188,8 @@ class CustomerApiController extends ApiController
         $fresh = $customer->fresh();
         try {
             $fresh->load('contactPersons');
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+        }
 
         return $this->success($fresh, 'Customer updated successfully');
     }
@@ -480,9 +482,9 @@ class CustomerApiController extends ApiController
         $filename = 'accounts_customers_' . now()->format('YmdHis') . '.pdf';
 
         $pdf = Pdf::loadView('reports.generic_pdf', [
-            'data'     => $export->array(),
+            'data' => $export->array(),
             'headings' => $export->headings(),
-            'title'    => 'Accounts Customers Report',
+            'title' => 'Accounts Customers Report',
         ])->setPaper('a4', 'landscape');
 
         return $pdf->download($filename);
@@ -508,8 +510,8 @@ class CustomerApiController extends ApiController
 
             return $this->success([
                 'imported_count' => $importer->getImportedCount(),
-                'skipped_count'  => $importer->getSkippedCount(),
-                'errors'         => $importer->getErrors(),
+                'skipped_count' => $importer->getSkippedCount(),
+                'errors' => $importer->getErrors(),
             ], 'Customers imported successfully.');
         } catch (\Throwable $e) {
             return $this->error('Failed to import customers: ' . $e->getMessage(), 422);
