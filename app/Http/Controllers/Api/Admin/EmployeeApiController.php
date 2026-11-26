@@ -31,6 +31,15 @@ class EmployeeApiController extends ApiController
 
         if ($status === 'inactive') {
             $query = $query->onlyInactive();
+        } elseif ($status === 'onboarding') {
+            $query = $query->whereHas('user', function ($q) {
+                $q->where('status', 'onboarding');
+            });
+        } else {
+            // Default: strictly Active/confirmed employees, NEVER onboarding
+            $query = $query->whereHas('user', function ($q) {
+                $q->where('status', 'active');
+            });
         }
 
         $employees = $query->paginate($perPage);
@@ -194,7 +203,7 @@ class EmployeeApiController extends ApiController
     public function updateStatus(Request $request, Employee $employee): JsonResponse
     {
         $request->validate([
-            'status' => 'required|in:active,inactive'
+            'status' => 'required|in:active,inactive,onboarding'
         ]);
 
         // Update status in user table
@@ -202,7 +211,46 @@ class EmployeeApiController extends ApiController
             'status' => $request->status
         ]);
 
+        // If activating an onboarding employee, sync with OnboardingEmployee record
+        if ($request->status === 'active') {
+            try {
+                \App\Models\OnboardingEmployee::where('employee_id', $employee->id)
+                    ->orWhere('user_id', $employee->user_id)
+                    ->update([
+                        'status' => 'active',
+                        'activated_at' => now(),
+                        'user_id' => $employee->user_id,
+                        'employee_id' => $employee->id,
+                    ]);
+            } catch (\Throwable $e) {
+                // Table might not exist yet if migration not run
+            }
+        } elseif ($request->status === 'onboarding') {
+            try {
+                \App\Models\OnboardingEmployee::where('employee_id', $employee->id)
+                    ->orWhere('user_id', $employee->user_id)
+                    ->update([
+                        'status' => 'onboarding',
+                        'activated_at' => null,
+                    ]);
+            } catch (\Throwable $e) {
+                // Table might not exist yet if migration not run
+            }
+        }
+
         return $this->success($employee->load('user'), 'Status updated successfully');
+    }
+
+    public function getOnboardingEmployees(Request $request): JsonResponse
+    {
+        $query = Employee::with(['user.company', 'user.department', 'user.designation', 'salaryComponents', 'bankDetails', 'verification', 'preOnboardingChecklist'])
+            ->whereHas('user', function ($q) {
+                $q->where('status', 'onboarding');
+            });
+
+        $employees = $query->get();
+
+        return $this->success($employees);
     }
 
     public function uploadTemp(Request $request)
