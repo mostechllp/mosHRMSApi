@@ -175,6 +175,38 @@ class EmployeeOnboardingApiController extends ApiController
                     $employee->user->update($userData);
                 }
             }
+
+            // Sync to OnboardingEmployee table for separate onboarding tracking
+            try {
+                \App\Models\OnboardingEmployee::updateOrCreate(
+                    ['employee_id' => $employee->id],
+                    [
+                        'onboarding_id' => $employee->employee_id,
+                        'user_id' => $employee->user_id,
+                        'first_name' => $employee->first_name,
+                        'last_name' => $employee->last_name,
+                        'personal_email' => $employee->personal_email,
+                        'company_email' => $employee->company_email,
+                        'personal_number' => $employee->personal_number,
+                        'nationality' => $employee->nationality,
+                        'address' => $employee->address,
+                        'joining_date' => $employee->joining_date,
+                        'dob' => $employee->dob,
+                        'gender' => $employee->gender,
+                        'marital_status' => $employee->marital_status,
+                        'experience_level' => $employee->experience_level,
+                        'key_skills' => $employee->key_skills,
+                        'highest_education' => $employee->highest_education,
+                        'department_id' => $request->department_id ?? ($employee->user ? $employee->user->department_id : null),
+                        'designation_id' => $request->designation_id ?? ($employee->user ? $employee->user->designation_id : null),
+                        'company_id' => $employee->user ? $employee->user->company_id : null,
+                        'organization_id' => $employee->user ? $employee->user->organization_id : null,
+                        'status' => 'onboarding',
+                    ]
+                );
+            } catch (\Throwable $e) {
+                // Ignore if migration not run yet
+            }
         });
 
         return $this->success(

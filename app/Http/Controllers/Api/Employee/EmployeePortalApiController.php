@@ -632,7 +632,7 @@ class EmployeePortalApiController extends ApiController
             'punch_in_time'    => $attendance && $attendance->punch_in ? Carbon::parse($attendance->punch_in)->setTimezone($tz)->format('h:i A') : null,
             'raw_punch_in'     => $attendance ? $attendance->punch_in : null,
             'current_time'     => $now->format('h:i A'),
-            'cutoff_time'      => Carbon::parse($lateCutoffTime)->format('h:i A'),
+            'cutoff_time'      => '10:00 AM',
             'is_late'          => $isPastCutoff,
             'has_leave_today'  => $hasLeaveToday,
             'can_punch_in'     => $canPunchIn,
@@ -718,11 +718,11 @@ class EmployeePortalApiController extends ApiController
             if (empty(trim((string)$reason))) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Late Punch-in: You are attempting to punch in after ' . Carbon::parse($lateCutoffTime)->format('h:i A') . '. HR approval is required. Please provide your reason to request HR approval.',
+                    'message' => 'Late Punch-in: You are attempting to punch in after 10:00 AM. HR approval is required. Please provide your reason to request HR approval.',
                     'data' => [
                         'is_late' => true,
                         'requires_reason' => true,
-                        'cutoff_time' => $lateCutoffTime,
+                        'cutoff_time' => '10:00 AM',
                         'can_punch_in' => false,
                     ]
                 ], 403);
@@ -774,7 +774,7 @@ class EmployeePortalApiController extends ApiController
                 'data'    => [
                     'attendance'      => $log,
                     'is_late'         => true,
-                    'cutoff_time'     => $lateCutoffTime,
+                    'cutoff_time'     => '10:00 AM',
                     'punch_in_time'   => $now->format('h:i A'),
                     'raw_punch_in'    => $now->toDateTimeString(),
                     'approval_status' => 'pending',
@@ -805,7 +805,7 @@ class EmployeePortalApiController extends ApiController
                 'attendance'      => $log,
                 'is_late'         => false,
                 'has_leave_today' => false,
-                'cutoff_time'     => $lateCutoffTime,
+                'cutoff_time'     => '10:00 AM',
                 'punch_in_time'   => $now->format('h:i A'),
                 'raw_punch_in'    => $now->toDateTimeString(),
                 'approval_status' => null,

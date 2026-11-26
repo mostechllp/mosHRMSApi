@@ -133,6 +133,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
     // Employees
     Route::get('employees', [EmployeeApiController::class, 'index'])->middleware('permission:employees.read');
     Route::get('active-employees', [EmployeeApiController::class, 'getActiveEmployees'])->middleware('permission:employees.read');
+    Route::get('onboarding-employees', [EmployeeApiController::class, 'getOnboardingEmployees'])->middleware('permission:employees.read');
     Route::get('employees/{employee}', [EmployeeApiController::class, 'show'])->middleware('permission:employees.read');
     Route::post('employees', [EmployeeApiController::class, 'store'])->middleware('permission:employees.edit');
     Route::put('employees/{employee}', [EmployeeApiController::class, 'update'])->middleware('permission:employees.edit');
@@ -140,6 +141,7 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
 
     Route::post('employees/upload-temp', [EmployeeApiController::class, 'uploadTemp']);
     Route::post('employees/{employee}/update-status', [EmployeeApiController::class, 'updateStatus'])->middleware('permission:employees.edit');
+    Route::put('employees/{employee}/status', [EmployeeApiController::class, 'updateStatus'])->middleware('permission:employees.edit');
 
     // Warning Messages
     Route::group(['prefix' => 'warnings', 'middleware' => 'permission:employees.edit'], function () {
