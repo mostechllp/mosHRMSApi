@@ -17,6 +17,51 @@ use OpenApi\Attributes as OA;
 class EmployeeOnboardingApiController extends ApiController
 {
     /**
+     * Resolve an onboarding Employee safely without cross-table ID collisions.
+     * Always prioritizes onboarding candidates and primary employee IDs before user_id.
+     */
+    private function resolveOnboardingEmployee($targetId, array $with = [], bool $onboardingOnly = false): ?Employee
+    {
+        $baseQuery = fn() => !empty($with) ? Employee::with($with) : Employee::query();
+
+        // 1. Exact match on primary employees.id for an onboarding candidate
+        $emp = $baseQuery()->where('id', $targetId)
+            ->whereHas('user', fn($q) => $q->where('status', 'onboarding'))
+            ->first();
+        if ($emp) {
+            return $emp;
+        }
+
+        // 2. Match on user_id for an onboarding candidate
+        $emp = $baseQuery()->where('user_id', $targetId)
+            ->whereHas('user', fn($q) => $q->where('status', 'onboarding'))
+            ->first();
+        if ($emp) {
+            return $emp;
+        }
+
+        // 3. Match on string employee_id code (e.g. EMP-XXXXXX) for an onboarding candidate
+        $emp = $baseQuery()->where('employee_id', $targetId)
+            ->whereHas('user', fn($q) => $q->where('status', 'onboarding'))
+            ->first();
+        if ($emp) {
+            return $emp;
+        }
+
+        if ($onboardingOnly) {
+            // Sequential fallback only for checking whether the target exists as non-onboarding
+            return $baseQuery()->where('id', $targetId)->first()
+                ?? $baseQuery()->where('user_id', $targetId)->first()
+                ?? $baseQuery()->where('employee_id', $targetId)->first();
+        }
+
+        // 4. Sequential fallback (never using mixed OR queries so id takes priority over user_id)
+        return $baseQuery()->where('id', $targetId)->first()
+            ?? $baseQuery()->where('user_id', $targetId)->first()
+            ?? $baseQuery()->where('employee_id', $targetId)->first();
+    }
+
+    /**
      * Get basic employee onboarding details
      */
     #[OA\Get(
@@ -39,7 +84,7 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('Employee ID or User ID is required', 400);
         }
 
-        $employee = Employee::with([
+        $employee = $this->resolveOnboardingEmployee($targetId, [
             'user.department',
             'user.designation',
             'user.organization',
@@ -47,11 +92,7 @@ class EmployeeOnboardingApiController extends ApiController
             'salaryComponents',
             'bankDetails',
             'verification'
-        ])
-            ->where('id', $targetId)
-            ->orWhere('user_id', $targetId)
-            ->orWhere('employee_id', $targetId)
-            ->first();
+        ]);
 
         if (!$employee) {
             return $this->error('Employee details not found', 404);
@@ -79,13 +120,14 @@ class EmployeeOnboardingApiController extends ApiController
         $employee = null;
 
         if ($user_id) {
-            $employee = Employee::where('user_id', $user_id)
-                ->orWhere('id', $user_id)
-                ->orWhere('employee_id', $user_id)
-                ->first();
+            $employee = $this->resolveOnboardingEmployee($user_id);
 
             if (!$employee) {
                 return $this->error('Employee not found', 404);
+            }
+
+            if ($employee->user && $employee->user->status !== 'onboarding') {
+                return $this->error('Active or confirmed employees cannot be modified through onboarding.', 422);
             }
         } else {
             $employee = new Employee();
@@ -261,11 +303,7 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('Employee ID or User ID is required', 400);
         }
 
-        $employee = Employee::with('verification')
-            ->where('id', $targetId)
-            ->orWhere('user_id', $targetId)
-            ->orWhere('employee_id', $targetId)
-            ->first();
+        $employee = $this->resolveOnboardingEmployee($targetId, ['verification']);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);
@@ -295,13 +333,14 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('User ID or Employee ID is required', 400);
         }
 
-        $employee = Employee::where('user_id', $user_id)
-            ->orWhere('id', $user_id)
-            ->orWhere('employee_id', $user_id)
-            ->first();
+        $employee = $this->resolveOnboardingEmployee($user_id);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);
+        }
+
+        if ($employee->user && $employee->user->status !== 'onboarding') {
+            return $this->error('Active or confirmed employees cannot be modified through onboarding.', 422);
         }
 
         $request->validate([
@@ -374,11 +413,7 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('Employee ID or User ID is required', 400);
         }
 
-        $employee = Employee::with('salaryComponents')
-            ->where('id', $targetId)
-            ->orWhere('user_id', $targetId)
-            ->orWhere('employee_id', $targetId)
-            ->first();
+        $employee = $this->resolveOnboardingEmployee($targetId, ['salaryComponents']);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);
@@ -413,13 +448,14 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('User ID or Employee ID is required', 400);
         }
 
-        $employee = Employee::where('user_id', $user_id)
-            ->orWhere('id', $user_id)
-            ->orWhere('employee_id', $user_id)
-            ->first();
+        $employee = $this->resolveOnboardingEmployee($user_id);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);
+        }
+
+        if ($employee->user && $employee->user->status !== 'onboarding') {
+            return $this->error('Active or confirmed employees cannot be modified through onboarding.', 422);
         }
 
         $request->validate([
@@ -481,11 +517,7 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('Employee ID or User ID is required', 400);
         }
 
-        $employee = Employee::with('bankDetails')
-            ->where('id', $targetId)
-            ->orWhere('user_id', $targetId)
-            ->orWhere('employee_id', $targetId)
-            ->first();
+        $employee = $this->resolveOnboardingEmployee($targetId, ['bankDetails']);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);
@@ -515,13 +547,14 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('User ID or Employee ID is required', 400);
         }
 
-        $employee = Employee::where('user_id', $user_id)
-            ->orWhere('id', $user_id)
-            ->orWhere('employee_id', $user_id)
-            ->first();
+        $employee = $this->resolveOnboardingEmployee($user_id);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);
+        }
+
+        if ($employee->user && $employee->user->status !== 'onboarding') {
+            return $this->error('Active or confirmed employees cannot be modified through onboarding.', 422);
         }
 
         $request->validate([
@@ -571,11 +604,7 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('User ID or Employee ID is required', 400);
         }
 
-        $employee = Employee::with('preOnboardingChecklist')
-            ->where('id', $user_id)
-            ->orWhere('user_id', $user_id)
-            ->orWhere('employee_id', $user_id)
-            ->first();
+        $employee = $this->resolveOnboardingEmployee($user_id, ['preOnboardingChecklist']);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);
@@ -605,13 +634,14 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('User ID or Employee ID is required', 400);
         }
 
-        $employee = Employee::where('id', $user_id)
-            ->orWhere('user_id', $user_id)
-            ->orWhere('employee_id', $user_id)
-            ->first();
+        $employee = $this->resolveOnboardingEmployee($user_id);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);
+        }
+
+        if ($employee->user && $employee->user->status !== 'onboarding') {
+            return $this->error('Active or confirmed employees cannot be modified through onboarding.', 422);
         }
 
         $validated = $request->validate([
@@ -677,13 +707,14 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('User ID or Employee ID is required', 400);
         }
 
-        $employee = Employee::where('user_id', $user_id)
-            ->orWhere('id', $user_id)
-            ->orWhere('employee_id', $user_id)
-            ->first();
+        $employee = $this->resolveOnboardingEmployee($user_id);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);
+        }
+
+        if ($employee->user && $employee->user->status !== 'onboarding') {
+            return $this->error('This employee is already ' . $employee->user->status . ' and cannot be completed through onboarding.', 422);
         }
 
         if ($employee->user) {
@@ -729,18 +760,14 @@ class EmployeeOnboardingApiController extends ApiController
             return $this->error('Employee ID or User ID is required', 400);
         }
 
-        $employee = Employee::with([
+        $employee = $this->resolveOnboardingEmployee($targetId, [
             'user.department',
             'user.designation',
             'salaryComponents',
             'bankDetails',
             'verification',
             'preOnboardingChecklist',
-        ])
-            ->where('id', $targetId)
-            ->orWhere('user_id', $targetId)
-            ->orWhere('employee_id', $targetId)
-            ->first();
+        ]);
 
         if (!$employee) {
             return $this->error('Employee not found', 404);

@@ -26,9 +26,29 @@ use Illuminate\Http\JsonResponse;
 class EmployeePortalApiController extends ApiController
 {
     /**
+     * Format a stored datetime string (saved in the shift's timezone) into the target display timezone.
+     */
+    private function formatStoredTime(?string $value, ?string $storedTz, string $displayTz, string $format = 'h:i A'): string
+    {
+        if (!$value || $value === '--') {
+            return '--';
+        }
+
+        $sourceTz = $storedTz ?: $displayTz;
+
+        try {
+            return Carbon::parse($value, $sourceTz)
+                ->setTimezone($displayTz)
+                ->format($format);
+        } catch (\Throwable $e) {
+            return Carbon::parse($value)->format($format);
+        }
+    }
+
+    /**
      * Get Employee Dashboard Data
      */
-    public function dashboard(): JsonResponse
+    public function dashboard(Request $request): JsonResponse
     {
         $user = auth('api')->user();
         if (!$user)
@@ -40,12 +60,22 @@ class EmployeePortalApiController extends ApiController
 
         $user->load('department', 'company', 'designation', 'role');
 
-        $today = Carbon::today()->toDateString();
+        $reqTz = $request->timezone ?: $request->header('X-Timezone');
+        if ($reqTz) {
+            try {
+                $today = Carbon::now($reqTz)->toDateString();
+            } catch (\Throwable $e) {
+                $reqTz = null;
+                $today = Carbon::today()->toDateString();
+            }
+        } else {
+            $today = Carbon::today()->toDateString();
+        }
 
         // Attendance stats for today
         $attendance = AttendanceLog::where('userid', $user->id)
             ->whereDate('log_date', $today)
-            ->select('punch_in', 'punch_out', 'punch_in_latitude', 'punch_in_longitude', 'punch_in_address', 'punch_out_latitude', 'punch_out_longitude', 'punch_out_address', 'working_hours')
+            ->select('punch_in', 'punch_out', 'punch_in_latitude', 'punch_in_longitude', 'punch_in_address', 'punch_out_latitude', 'punch_out_longitude', 'punch_out_address', 'working_hours', 'timezone')
             ->first();
 
         // Store raw punch_out status BEFORE formatting
@@ -82,15 +112,11 @@ class EmployeePortalApiController extends ApiController
         }
 
         if ($attendance) {
-            $tz = config('app.timezone', 'Asia/Dubai');
+            $storedTz = $attendance->timezone ?: ($reqTz ?: config('app.timezone', 'Asia/Dubai'));
+            $tz = $reqTz ?: $storedTz;
 
-            $attendance->punch_in = $attendance->punch_in
-                ? Carbon::parse($attendance->punch_in)->setTimezone($tz)->format('h:i A')
-                : '--';
-
-            $attendance->punch_out = $attendance->punch_out
-                ? Carbon::parse($attendance->punch_out)->setTimezone($tz)->format('h:i A')
-                : '--';
+            $attendance->punch_in = $this->formatStoredTime($attendance->punch_in, $storedTz, $tz, 'h:i A');
+            $attendance->punch_out = $this->formatStoredTime($attendance->punch_out, $storedTz, $tz, 'h:i A');
 
             // Format working_minutes → "8 hrs 30 mins"
             $minutes = $attendance->working_hours ?? 0;
@@ -117,25 +143,21 @@ class EmployeePortalApiController extends ApiController
 
         $attendanceHistory = AttendanceLog::where('userid', $user->id)
             ->whereBetween('log_date', [$from, $to])
-            ->select('log_date', 'punch_in', 'punch_out', 'punch_in_latitude', 'punch_in_longitude', 'punch_in_address', 'punch_out_latitude', 'punch_out_longitude', 'punch_out_address', 'working_hours')
+            ->select('log_date', 'punch_in', 'punch_out', 'punch_in_latitude', 'punch_in_longitude', 'punch_in_address', 'punch_out_latitude', 'punch_out_longitude', 'punch_out_address', 'working_hours', 'timezone')
             ->orderByDesc('log_date')
             ->get();
 
         if ($attendanceHistory) {
-            $attendanceHistory->transform(function ($log) {
-                $tz = config('app.timezone', 'Asia/Kolkata');
+            $attendanceHistory->transform(function ($log) use ($reqTz) {
+                $storedTz = $log->timezone ?: ($reqTz ?: config('app.timezone', 'Asia/Kolkata'));
+                $tz = $reqTz ?: $storedTz;
 
                 $log->log_date = $log->log_date
                     ? Carbon::parse($log->log_date)->format('d/m/Y')
                     : '--';
 
-                $log->punch_in = $log->punch_in
-                    ? Carbon::parse($log->punch_in)->setTimezone($tz)->format('h:i A')
-                    : '--';
-
-                $log->punch_out = $log->punch_out
-                    ? Carbon::parse($log->punch_out)->setTimezone($tz)->format('h:i A')
-                    : '--';
+                $log->punch_in = $this->formatStoredTime($log->punch_in, $storedTz, $tz, 'h:i A');
+                $log->punch_out = $this->formatStoredTime($log->punch_out, $storedTz, $tz, 'h:i A');
 
                 // Format working_hours → "8 hrs 30 mins"
                 $minutes = $log->working_hours ?? 0;
@@ -626,11 +648,13 @@ class EmployeePortalApiController extends ApiController
             $approvalStatus = null;
         }
 
+        $storedTz = ($attendance && !empty($attendance->timezone)) ? $attendance->timezone : $tz;
+
         return $this->success([
             'is_punched_in'    => (bool)$attendance,
             'is_punched_out'   => $attendance && !is_null($attendance->punch_out),
-            'punch_in_time'    => $attendance && $attendance->punch_in ? Carbon::parse($attendance->punch_in)->setTimezone($tz)->format('h:i A') : null,
-            'raw_punch_in'     => $attendance ? $attendance->punch_in : null,
+            'punch_in_time'    => ($attendance && $attendance->punch_in) ? $this->formatStoredTime($attendance->punch_in, $storedTz, $tz, 'h:i A') : null,
+            'raw_punch_in'     => ($attendance && $attendance->punch_in) ? $this->formatStoredTime($attendance->punch_in, $storedTz, $tz, 'Y-m-d H:i:s') : null,
             'current_time'     => $now->format('h:i A'),
             'cutoff_time'      => '10:00 AM',
             'is_late'          => $isPastCutoff,
@@ -676,16 +700,6 @@ class EmployeePortalApiController extends ApiController
             return $this->error("You have a pending punch-out for {$missingPunchOut->log_date}. Please complete your project timings and punch out for that day first.", 403);
         }
 
-        $today = Carbon::today()->toDateString();
-
-        $alreadyPunched = AttendanceLog::where('userid', $user->id)
-            ->whereDate('log_date', $today)
-            ->exists();
-
-        if ($alreadyPunched) {
-            return $this->error('Already punched in today.', 400);
-        }
-
         $tz = $request->timezone ?: ($request->header('X-Timezone') ?: 'Asia/Dubai');
         try {
             $now = Carbon::now($tz);
@@ -694,6 +708,14 @@ class EmployeePortalApiController extends ApiController
             $now = Carbon::now($tz);
         }
         $today = $now->toDateString();
+
+        $alreadyPunched = AttendanceLog::where('userid', $user->id)
+            ->whereDate('log_date', $today)
+            ->exists();
+
+        if ($alreadyPunched) {
+            return $this->error('Already punched in today.', 400);
+        }
 
         // Check if employee applied for leave today (pending or approved)
         $hasLeaveToday = LeaveRequest::where('employee_id', $employee->id)
@@ -1120,11 +1142,13 @@ class EmployeePortalApiController extends ApiController
             ? '0 mins'
             : ($tbHours == 0 ? "{$tbMins} mins" : ($tbMins == 0 ? "{$tbHours} hrs" : "{$tbHours} hrs {$tbMins} mins"));
 
+        $storedTz = $attendance->timezone ?: $tz;
+
         return $this->success([
             'attendance_log_id' => $attendance->id,
             'log_date' => $attendance->log_date,
-            'punch_in' => $attendance->punch_in ? Carbon::parse($attendance->punch_in)->setTimezone($tz)->format('h:i A') : '--',
-            'punch_out' => $attendance->punch_out ? Carbon::parse($attendance->punch_out)->setTimezone($tz)->format('h:i A') : '--',
+            'punch_in' => $this->formatStoredTime($attendance->punch_in, $storedTz, $tz, 'h:i A'),
+            'punch_out' => $this->formatStoredTime($attendance->punch_out, $storedTz, $tz, 'h:i A'),
             'breaks' => $breaks,
             'total_breaks_count' => $breaks->count(),
             'total_break_minutes' => $totalBreakMinutes,
