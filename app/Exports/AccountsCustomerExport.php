@@ -40,6 +40,8 @@ class AccountsCustomerExport implements FromArray, WithHeadings, WithStyles, Sho
             'Currency',
             'Opening Balance',
             'Payment Terms',
+            'Status',
+            'Source',
             'Billing Attention',
             'Billing Country',
             'Billing Street 1',

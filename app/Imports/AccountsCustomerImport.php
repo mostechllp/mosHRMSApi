@@ -81,6 +81,9 @@ class AccountsCustomerImport implements ToCollection, WithHeadingRow, SkipsEmpty
                 'shipping_phone'      => $this->val($rowArr, ['shipping_phone', 'shipping phone']),
 
                 'remarks'             => $this->val($rowArr, ['remarks', 'internal_notes', 'internal notes']),
+                'source'              => 'import',
+                'status'              => strtolower($this->val($rowArr, ['status']) ?? '') === 'inactive' ? 'inactive' : 'active',
+                'unused_credits'      => is_numeric($this->val($rowArr, ['unused_credits', 'unused credits', 'unused_credits_bcy', 'unused credits (bcy)'])) ? (float) $this->val($rowArr, ['unused_credits', 'unused credits', 'unused_credits_bcy', 'unused credits (bcy)']) : 0,
             ];
 
             try {

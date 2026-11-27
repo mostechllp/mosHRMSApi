@@ -15,6 +15,8 @@ use App\Http\Controllers\Api\Admin\DashboardApiController;
 use App\Http\Controllers\Api\Admin\PartyApiController;
 use App\Http\Controllers\Api\Admin\Accounts\ContactPersonApiController;
 use App\Http\Controllers\Api\Admin\Accounts\CustomerApiController as AccountsCustomerApiController;
+use App\Http\Controllers\Api\Admin\Accounts\ItemApiController;
+use App\Http\Controllers\Api\Admin\Accounts\VendorApiController;
 use App\Http\Controllers\Api\Admin\DocumentApiController;
 use App\Http\Controllers\Api\Admin\FolderApiController;
 use App\Http\Controllers\Api\Admin\LeaveApiController;
@@ -796,6 +798,17 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'admin'], function () {
         Route::get('customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
         Route::apiResource('customers', AccountsCustomerApiController::class);
         Route::apiResource('customers.contact-persons', ContactPersonApiController::class);
+
+        // Vendors
+        Route::apiResource('vendors', VendorApiController::class);
+
+        // Items
+        Route::get('items/export', [ItemApiController::class, 'export']);
+        Route::get('items/export/excel', [ItemApiController::class, 'exportExcel']);
+        Route::get('items/export/pdf', [ItemApiController::class, 'exportPdf']);
+        Route::post('items/import', [ItemApiController::class, 'import']);
+        Route::get('items/form-options', [ItemApiController::class, 'formOptions']);
+        Route::apiResource('items', ItemApiController::class);
     });
 });
 
@@ -827,6 +840,17 @@ Route::group(['middleware' => 'auth:api', 'prefix' => 'accounts'], function () {
     Route::get('customers/form-options', [AccountsCustomerApiController::class, 'formOptions']);
     Route::apiResource('customers', AccountsCustomerApiController::class);
     Route::apiResource('customers.contact-persons', ContactPersonApiController::class);
+
+    // Vendors
+    Route::apiResource('vendors', VendorApiController::class);
+
+    // Items (/api/accounts/items)
+    Route::get('items/export', [ItemApiController::class, 'export']);
+    Route::get('items/export/excel', [ItemApiController::class, 'exportExcel']);
+    Route::get('items/export/pdf', [ItemApiController::class, 'exportPdf']);
+    Route::post('items/import', [ItemApiController::class, 'import']);
+    Route::get('items/form-options', [ItemApiController::class, 'formOptions']);
+    Route::apiResource('items', ItemApiController::class);
 });
 
 

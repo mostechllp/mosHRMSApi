@@ -53,12 +53,16 @@ class AccountsCustomer extends Model
         'shipping_fax',
         'contact_persons',
         'remarks',
+        'source',
+        'status',
+        'unused_credits',
         'created_by',
         'updated_by',
     ];
 
     protected $casts = [
         'opening_balance' => 'decimal:2',
+        'unused_credits' => 'decimal:2',
         'portal_access' => 'boolean',
         'currencies' => 'array',
         'exchange_rates' => 'array',

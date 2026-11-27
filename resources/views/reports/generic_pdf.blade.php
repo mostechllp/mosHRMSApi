@@ -5,6 +5,18 @@
     <meta charset="UTF-8">
     <title>{{ $title }}</title>
     <style>
+        @font-face {
+            font-family: 'DejaVu Sans';
+            font-style: normal;
+            font-weight: normal;
+            src: url('{{ storage_path("fonts/DejaVuSans.ttf") }}') format('truetype');
+        }
+
+        body,
+        table {
+            font-family: 'DejaVu Sans', sans-serif;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,7 +24,6 @@
         }
 
         body {
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             font-size: 11px;
             color: #2d3748;
             background: #fff;
@@ -52,7 +63,7 @@
             width: 100%;
             border-collapse: collapse;
             margin-top: 14px;
-            table-layout: fixed; 
+            table-layout: fixed;
         }
 
         thead tr {
@@ -66,7 +77,7 @@
             font-size: 11px;
             font-weight: bold;
             border: 1px solid #16304f;
-            white-space: normal; 
+            white-space: normal;
         }
 
         tbody tr {
@@ -87,7 +98,7 @@
             font-size: 10.5px;
             line-height: 1.55;
             color: #333;
-            word-wrap: break-word;   
+            word-wrap: break-word;
         }
 
         tbody td.center {
@@ -115,8 +126,6 @@
             color: #999;
             text-align: center;
         }
-
-
     </style>
 </head>
 
@@ -135,17 +144,17 @@
         <thead>
             <tr>
                 @foreach($headings as $heading)
-                <th>{{ $heading }}</th>
+                    <th>{{ $heading }}</th>
                 @endforeach
             </tr>
         </thead>
         <tbody>
             @foreach($data as $row)
-            <tr>
-                @foreach($row as $cell)
-                <td>{{ $cell }}</td>
-                @endforeach
-            </tr>
+                <tr>
+                    @foreach($row as $cell)
+                        <td>{{ $cell }}</td>
+                    @endforeach
+                </tr>
             @endforeach
         </tbody>
     </table>

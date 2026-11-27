@@ -56,6 +56,16 @@ class CustomerApiController extends ApiController
             $query->where('customer_type', $request->customer_type);
         }
 
+        // Filter by Status (active / inactive)
+        if ($request->filled('status')) {
+            $query->where('status', strtolower($request->status));
+        }
+
+        // Filter by Source (user / import)
+        if ($request->filled('source')) {
+            $query->where('source', strtolower($request->source));
+        }
+
         $perPage = max(1, (int) $request->input('per_page', 15));
         $customers = $query->paginate($perPage);
 
@@ -95,6 +105,10 @@ class CustomerApiController extends ApiController
             'exchangeRates' => 'nullable|array',
             'opening_balance' => 'nullable|numeric',
             'openingBalance' => 'nullable|numeric',
+            'unused_credits' => 'nullable|numeric',
+            'unusedCredits' => 'nullable|numeric',
+            'source' => 'nullable|string|max:50',
+            'status' => 'nullable|in:active,inactive,Active,Inactive',
             'payment_terms' => 'nullable|string|max:100',
             'paymentTerms' => 'nullable|string|max:100',
             'portal_access' => 'nullable|boolean',
@@ -356,6 +370,9 @@ class CustomerApiController extends ApiController
             'exchange_rates' => $exchangeRates,
             'receivable_account' => $request->input('receivableAccount') ?? $request->input('receivable_account', $existing?->receivable_account ?? 'Accounts Receivable'),
             'opening_balance' => (float) ($request->input('openingBalance') ?? $request->input('opening_balance', $existing?->opening_balance ?? 0)),
+            'unused_credits' => (float) ($request->input('unusedCredits') ?? $request->input('unused_credits', $existing?->unused_credits ?? 0)),
+            'source' => $request->input('source', $existing?->source ?? 'user'),
+            'status' => strtolower($request->input('status', $existing?->status ?? 'active')) === 'inactive' ? 'inactive' : 'active',
             'payment_terms' => $request->input('paymentTerms') ?? $request->input('payment_terms', $existing?->payment_terms ?? 'Due on receipt'),
             'portal_access' => (bool) ($request->input('portalAccess') ?? $request->input('portal_access', $existing?->portal_access ?? false)),
 
@@ -492,9 +509,9 @@ class CustomerApiController extends ApiController
         $filename = 'accounts_customers_' . now()->format('YmdHis') . '.pdf';
 
         $pdf = Pdf::loadView('reports.generic_pdf', [
-            'data'     => $rows,
+            'data' => $rows,
             'headings' => $headings,
-            'title'    => 'Accounts Customers Report',
+            'title' => 'Accounts Customers Report',
         ])->setPaper('a4', 'landscape');
 
         return $pdf->download($filename);
@@ -567,6 +584,14 @@ class CustomerApiController extends ApiController
             $query->where('customer_type', $request->customer_type);
         }
 
+        if ($request->filled('status')) {
+            $query->where('status', strtolower($request->status));
+        }
+
+        if ($request->filled('source')) {
+            $query->where('source', strtolower($request->source));
+        }
+
         return $query;
     }
 
@@ -592,6 +617,8 @@ class CustomerApiController extends ApiController
                 $c->base_currency ?? 'INR',
                 $c->opening_balance ?? 0,
                 $c->payment_terms ?? 'Due on receipt',
+                $c->status ?? 'active',
+                $c->source ?? 'user',
                 $c->billing_attention ?? '',
                 $c->billing_country ?? '',
                 $c->billing_street1 ?? '',
@@ -638,6 +665,12 @@ class CustomerApiController extends ApiController
 
         $rows = [];
         foreach ($customers as $c) {
+            $currencyCode = strtoupper($c->base_currency ?? 'INR');
+            $currencySymbol = $this->getCurrencySymbol($currencyCode);
+
+            $receivablesVal = (float) ($c->opening_balance ?? 0);
+            $unusedCreditsVal = (float) ($c->unused_credits ?? 0);
+
             $row = [];
             foreach ($columnKeys as $normKey) {
                 $row[] = match ($normKey) {
@@ -648,16 +681,17 @@ class CustomerApiController extends ApiController
                     'phone', 'workphone' => $c->work_phone ?? ($c->mobile ?? ''),
                     'mobile', 'mobilephone' => $c->mobile ?? '',
                     'companyname', 'company' => $c->company_name ?? '',
-                    'receivablesbcy', 'receivables' => isset($c->receivables) ? number_format((float) $c->receivables, 2) : '0.00',
-                    'unusedcreditsbcy', 'unusedcredits' => isset($c->unused_credits) ? number_format((float) $c->unused_credits, 2) : '0.00',
-                    'source', 'customersource' => $c->customer_source ?? ($c->source ?? '-'),
+                    'receivablesbcy', 'receivables' => $currencySymbol . number_format($receivablesVal, 2),
+                    'unusedcreditsbcy', 'unusedcredits' => $currencySymbol . number_format($unusedCreditsVal, 2),
+                    'source', 'customersource' => $c->source ?? ($c->customer_source ?? 'user'),
+                    'status', 'customerstatus' => $c->status ?? 'active',
                     'salutation' => $c->salutation ?? '',
                     'customertype', 'type' => $c->customer_type ?? 'Business',
                     'taxidpan', 'taxid', 'pan', 'gstinpan', 'gstin' => $c->gstin_pan ?? ($c->pan ?? ''),
-                    'currency', 'basecurrency' => $c->base_currency ?? 'INR',
+                    'currency', 'basecurrency' => $currencyCode,
                     'paymentterms' => $c->payment_terms ?? 'Due on receipt',
                     'portalaccess' => $c->portal_access ? 'Yes' : 'No',
-                    'openingbalance' => isset($c->opening_balance) ? number_format((float) $c->opening_balance, 2) : '0.00',
+                    'openingbalance' => $currencySymbol . number_format($receivablesVal, 2),
                     'receivableaccount' => $c->receivable_account ?? 'Accounts Receivable',
                     'createdat', 'created' => $c->created_at ? $c->created_at->format('Y-m-d') : '-',
                     'country' => $c->country ?? 'India',
@@ -671,6 +705,30 @@ class CustomerApiController extends ApiController
         }
 
         return [$headings, $rows];
+    }
+
+    /**
+     * Helper to return currency symbol based on base currency code.
+     */
+    private function getCurrencySymbol(?string $currencyCode): string
+    {
+        $code = strtoupper(trim((string) $currencyCode));
+
+        return match ($code) {
+            'INR' => '₹',
+            'USD' => '$',
+            'EUR' => '€',
+            'GBP' => '£',
+            'AED' => 'AED ',
+            'SAR' => 'SAR ',
+            'JPY' => '¥',
+            'RUB' => '₽',
+            'CNY' => '¥',
+            'CAD' => 'CA$',
+            'AUD' => 'A$',
+            'SGD' => 'S$',
+            default => $code ? ($code . ' ') : '₹',
+        };
     }
 
     /**
